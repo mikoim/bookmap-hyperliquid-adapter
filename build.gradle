@@ -77,7 +77,7 @@ tasks.register('verifyJava8Bytecode') {
         fileTree(layout.buildDirectory.dir('classes').get().asFile).matching { include '**/*.class' }.files.each { classFile ->
             classFile.withInputStream { input ->
                 DataInputStream data = new DataInputStream(input)
-                if (data.readInt() != 0xCAFEBABE) {
+                if (data.readInt() != (int) 0xCAFEBABE) {
                     throw new GradleException("Invalid class file: $classFile")
                 }
                 data.readUnsignedShort()
