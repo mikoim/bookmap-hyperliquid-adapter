@@ -1,7 +1,5 @@
 package com.bookmap.plugins.layer0.hyperliquid.transport;
 
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
-
 /** A classified, credential-free failure from Hyperliquid transport or protocol handling. */
 public final class TransportFailure {
 
@@ -17,9 +15,6 @@ public final class TransportFailure {
   private final Throwable cause;
 
   /** Creates a classified failure. */
-  @SuppressFBWarnings(
-      value = "EI_EXPOSE_REP2",
-      justification = "Throwable identity is part of the transport failure contract.")
   public TransportFailure(Kind kind, String message, Throwable cause) {
     if (kind == null) {
       throw new IllegalArgumentException("kind must not be null");
@@ -40,9 +35,6 @@ public final class TransportFailure {
   }
 
   /** Returns the underlying failure when one exists. */
-  @SuppressFBWarnings(
-      value = "EI_EXPOSE_REP",
-      justification = "Throwable identity is part of the transport failure contract.")
   public Throwable cause() {
     return cause;
   }

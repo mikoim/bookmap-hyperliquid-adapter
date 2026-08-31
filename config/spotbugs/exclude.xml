@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+  <Match>
+    <Class name="com.bookmap.plugins.layer0.hyperliquid.transport.HyperliquidTransport"/>
+    <Method name="start"/>
+    <Bug pattern="THROWS_METHOD_THROWS_CLAUSE_BASIC_EXCEPTION"/>
+  </Match>
+  <Match>
+    <Class name="com.bookmap.plugins.layer0.hyperliquid.transport.TransportFailure"/>
+    <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+  </Match>
+  <Match>
+    <Class name="com.bookmap.plugins.layer0.hyperliquid.transport.JettyHyperliquidTransport"/>
+    <Bug pattern="SIC_INNER_SHOULD_BE_STATIC_ANON"/>
+  </Match>
+  <Match>
+    <Class name="com.bookmap.plugins.layer0.hyperliquid.transport.JettySocket"/>
+    <Bug pattern="SIC_INNER_SHOULD_BE_STATIC_ANON"/>
+  </Match>
+</FindBugsFilter>

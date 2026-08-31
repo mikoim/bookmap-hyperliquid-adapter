@@ -1,6 +1,5 @@
 package com.bookmap.plugins.layer0.hyperliquid.transport;
 
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CancellationException;
@@ -45,9 +44,6 @@ public final class JettyHyperliquidTransport implements HyperliquidTransport {
   }
 
   @Override
-  @SuppressFBWarnings(
-      value = "SIC_INNER_SHOULD_BE_STATIC_ANON",
-      justification = "The callback captures the request needed to implement cancellation.")
   public Cancellable postJson(
       URI uri, String contentType, String body, long timeoutMillis, final HttpCallback callback) {
     final Request request =
@@ -74,9 +70,6 @@ public final class JettyHyperliquidTransport implements HyperliquidTransport {
   }
 
   @Override
-  @SuppressFBWarnings(
-      value = "SIC_INNER_SHOULD_BE_STATIC_ANON",
-      justification = "The cancellable operation must capture its future and opened adapter.")
   public Cancellable connect(URI uri, long timeoutMillis, SocketCallback callback) {
     webSocketClient.setConnectTimeout(timeoutMillis);
     final SocketAdapter adapter = new SocketAdapter(callback);
@@ -134,9 +127,6 @@ final class JettySocket implements HyperliquidTransport.Socket {
   }
 
   @Override
-  @SuppressFBWarnings(
-      value = "SIC_INNER_SHOULD_BE_STATIC_ANON",
-      justification = "The write callback captures the caller's completion boundary.")
   public void send(String body, final HyperliquidTransport.SendCallback callback) {
     final AtomicBoolean completed = new AtomicBoolean();
     try {

@@ -16,6 +16,7 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
   private final List<URI> connectCalls = new ArrayList<URI>();
   private long connectTimeoutMillis;
   private SocketCallback socketCallback;
+  private final List<SocketCallback> socketCallbacks = new ArrayList<SocketCallback>();
   private final FakeSocket socket = new FakeSocket();
   private boolean httpCancelled;
   private boolean connectCancelled;
@@ -46,6 +47,7 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
     connectCalls.add(uri);
     connectTimeoutMillis = timeoutMillis;
     socketCallback = callback;
+    socketCallbacks.add(callback);
     return new Cancellable() {
       @Override
       public void cancel() {
@@ -95,6 +97,10 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
     return connectCancelled;
   }
 
+  public void emitTextFromConnection(int connectionIndex, String text) {
+    socketCallbacks.get(connectionIndex).onText(text);
+  }
+
   public void completeMeta(int status, String body) {
     httpCallback.onComplete(status, body, null);
   }
@@ -130,9 +136,15 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
     private final List<String> successfulSendBodies = new ArrayList<String>();
     private String closeReason;
     private int closeCode;
+    private Throwable nextSendFailure;
 
     @Override
     public void send(String body, SendCallback callback) {
+      if (nextSendFailure != null) {
+        Throwable failure = nextSendFailure;
+        nextSendFailure = null;
+        throwUnchecked(failure);
+      }
       pending.add(new PendingSend(body, callback));
     }
 
@@ -172,6 +184,19 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
 
     public int closeCode() {
       return closeCode;
+    }
+
+    public void throwOnNextSend(Throwable failure) {
+      nextSendFailure = failure;
+    }
+
+    private static void throwUnchecked(Throwable failure) {
+      FakeSocket.<RuntimeException>throwAs(failure);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T extends Throwable> void throwAs(Throwable failure) throws T {
+      throw (T) failure;
     }
 
     private static final class PendingSend {

@@ -25,7 +25,6 @@ dependencies {
     compileOnly 'com.bookmap.api:api-core:7.4.0.10'
     compileOnly 'com.google.code.gson:gson:2.4'
     compileOnly 'org.eclipse.jetty.aggregate:jetty-all:9.3.8.v20160314'
-    compileOnly 'com.github.spotbugs:spotbugs-annotations:4.10.2'
 
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'com.bookmap.api:api-core:7.4.0.10'
@@ -62,6 +61,7 @@ spotbugs {
 }
 
 tasks.withType(com.github.spotbugs.snom.SpotBugsTask).configureEach {
+    excludeFilter = file('config/spotbugs/exclude.xml')
     reports {
         html.required = true
         xml.required = true

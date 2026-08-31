@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.TreeMap;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 
@@ -81,6 +82,7 @@ public final class HyperliquidConnector implements AutoCloseable {
   private CancellableScheduler.Cancellable heartbeat;
   private CancellableScheduler.Cancellable pongDeadline;
   private long generation;
+  private final FrameGenerationGate frameListenerGeneration = new FrameGenerationGate();
   private long initialConnectionSlotBlockedSinceMillis = -1L;
   private long lastPingAtMillis = -1L;
   private long lastPongAtMillis = -1L;
@@ -173,6 +175,10 @@ public final class HyperliquidConnector implements AutoCloseable {
             }
             desired.remove(key);
             cancelSubscriptionSends(key);
+            if (isReconnectOpening()) {
+              replaceReconnectOpening();
+              return;
+            }
             if (socketOpened) {
               sendWhenPossible(
                   new OutboundMessage(OutboundMessage.Kind.UNSUBSCRIBE, key, key.unsubscribeJson()),
@@ -319,7 +325,8 @@ public final class HyperliquidConnector implements AutoCloseable {
     int reservedFrames = initial ? 0 : desired.size() + 1;
     Decision<ConnectionPermit> decision = budget.tryAcquireConnection(now, reservedFrames);
     if (!decision.acquired()) {
-      if (initial && decision.retryAtMillis() <= now) {
+      boolean socketSlotBlocked = initial && reservedFrames == 0 && decision.retryAtMillis() == now;
+      if (socketSlotBlocked) {
         if (initialConnectionSlotBlockedSinceMillis < 0L) {
           initialConnectionSlotBlockedSinceMillis = now;
         }
@@ -381,6 +388,7 @@ public final class HyperliquidConnector implements AutoCloseable {
 
   private HyperliquidTransport.SocketCallback socketCallback(
       final long callbackGeneration, final boolean callbackInitial) {
+    final Listener callbackListener = listener;
     return new HyperliquidTransport.SocketCallback() {
       @Override
       public void onOpen(final HyperliquidTransport.Socket openedSocket) {
@@ -395,9 +403,8 @@ public final class HyperliquidConnector implements AutoCloseable {
 
       @Override
       public void onText(String text) {
-        Listener capturedListener = listener;
-        if (capturedListener != null) {
-          capturedListener.onFrame(callbackGeneration, text);
+        if (frameListenerGeneration.accepts(callbackGeneration)) {
+          callbackListener.onFrame(callbackGeneration, text);
         }
       }
 
@@ -431,8 +438,14 @@ public final class HyperliquidConnector implements AutoCloseable {
       openedSocket.close(1000, "stale connector generation");
       return;
     }
+    if (!openingInitial && connectionPermit.reservedFramesRemaining() > desired.size() + 1) {
+      openedSocket.close(1000, "reconnect reservation changed");
+      replaceReconnectOpening();
+      return;
+    }
     socket = openedSocket;
     socketOpened = true;
+    frameListenerGeneration.open(openingGeneration);
     cancel(handshakeDeadline);
     handshakeDeadline = null;
     connectRequest = null;
@@ -543,34 +556,42 @@ public final class HyperliquidConnector implements AutoCloseable {
       return;
     }
     final long capturedSentAt = sendStartedAtMillis;
-    socket.send(
-        pending.message.body(),
-        new HyperliquidTransport.SendCallback() {
-          @Override
-          public void onSuccess() {
-            stateSubmitter.accept(
-                new Runnable() {
-                  @Override
-                  public void run() {
-                    sendSucceeded(pending, capturedSentAt);
-                  }
-                });
-          }
+    try {
+      socket.send(
+          pending.message.body(),
+          new HyperliquidTransport.SendCallback() {
+            @Override
+            public void onSuccess() {
+              stateSubmitter.accept(
+                  new Runnable() {
+                    @Override
+                    public void run() {
+                      sendSucceeded(pending, capturedSentAt);
+                    }
+                  });
+            }
 
-          @Override
-          public void onFailure(final Throwable failure) {
-            stateSubmitter.accept(
-                new Runnable() {
-                  @Override
-                  public void run() {
-                    sendFailed(pending, failure);
-                  }
-                });
-          }
-        });
+            @Override
+            public void onFailure(final Throwable failure) {
+              stateSubmitter.accept(
+                  new Runnable() {
+                    @Override
+                    public void run() {
+                      sendFailed(pending, failure);
+                    }
+                  });
+            }
+          });
+    } catch (Throwable failure) {
+      sendFailed(pending, failure);
+    }
   }
 
   private void sendSucceeded(PendingSend pending, long sentAtMillis) {
+    if (pending.completed) {
+      return;
+    }
+    pending.completed = true;
     pendingSends.remove(pending);
     pending.close();
     if (pending.cancelled || !isCurrentOpenGeneration(pending.generation)) {
@@ -584,6 +605,10 @@ public final class HyperliquidConnector implements AutoCloseable {
   }
 
   private void sendFailed(PendingSend pending, Throwable failure) {
+    if (pending.completed) {
+      return;
+    }
+    pending.completed = true;
     pendingSends.remove(pending);
     pending.close();
     if (!pending.cancelled && isCurrentGeneration(pending.generation)) {
@@ -639,6 +664,7 @@ public final class HyperliquidConnector implements AutoCloseable {
     boolean wasOpened = socketOpened;
     generationActive = false;
     socketOpened = false;
+    frameListenerGeneration.clear();
     cancel(connectRequest);
     connectRequest = null;
     cancel(handshakeDeadline);
@@ -685,6 +711,25 @@ public final class HyperliquidConnector implements AutoCloseable {
               }
             },
             RECONNECT_DELAYS[index]);
+  }
+
+  private boolean isReconnectOpening() {
+    return generationActive && !socketOpened && !initialConnection && connectionPermit != null;
+  }
+
+  private void replaceReconnectOpening() {
+    if (!isReconnectOpening()) {
+      return;
+    }
+    generationActive = false;
+    frameListenerGeneration.clear();
+    cancel(connectRequest);
+    connectRequest = null;
+    cancel(handshakeDeadline);
+    handshakeDeadline = null;
+    connectionPermit.close();
+    connectionPermit = null;
+    attemptConnection(false);
   }
 
   private void scheduleConnectionAttempt(final boolean initial, long retryAtMillis) {
@@ -816,6 +861,7 @@ public final class HyperliquidConnector implements AutoCloseable {
     private final ConnectionPermit reservedConnection;
     private CancellableScheduler.Cancellable retryTask;
     private boolean cancelled;
+    private boolean completed;
 
     private PendingSend(
         OutboundMessage message,
@@ -837,6 +883,23 @@ public final class HyperliquidConnector implements AutoCloseable {
       if (frameReservation != null) {
         frameReservation.close();
       }
+    }
+  }
+
+  /** Safely publishes only the immutable-generation frame-delivery gate across callback threads. */
+  private static final class FrameGenerationGate {
+    private final AtomicLong acceptedGeneration = new AtomicLong(-1L);
+
+    private boolean accepts(long candidate) {
+      return acceptedGeneration.get() == candidate;
+    }
+
+    private void open(long accepted) {
+      acceptedGeneration.set(accepted);
+    }
+
+    private void clear() {
+      acceptedGeneration.set(-1L);
     }
   }
 }

@@ -1,15 +1,11 @@
 package com.bookmap.plugins.layer0.hyperliquid.transport;
 
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.net.URI;
 
 /** Asynchronous HTTP and WebSocket boundary used by the Hyperliquid connector. */
 public interface HyperliquidTransport extends AutoCloseable {
 
   /** Starts resources owned by this transport. */
-  @SuppressFBWarnings(
-      value = "THROWS_METHOD_THROWS_CLAUSE_BASIC_EXCEPTION",
-      justification = "The public transport contract deliberately exposes startup failures.")
   void start() throws Exception;
 
   /** Posts JSON and reports the completed HTTP response. */

@@ -5,12 +5,15 @@ import static org.junit.Assert.assertTrue;
 
 import com.bookmap.plugins.layer0.hyperliquid.HyperliquidConnector.Listener;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget;
+import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget.ConnectionPermit;
+import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget.FrameReservation;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.ManualScheduler;
 import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionKey;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionType;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMetaParser;
 import com.bookmap.plugins.layer0.hyperliquid.transport.TransportFailure;
+import java.lang.reflect.Constructor;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -154,8 +157,211 @@ public class HyperliquidConnectorTest {
     assertTrue(fixture.listener.instrumentNames.isEmpty());
   }
 
+  @Test
+  public void closeSuppressesLateRawFrameCallbacks() {
+    Fixture fixture = new Fixture();
+    fixture.startAndOpen();
+
+    fixture.connector.close();
+    fixture.transport.emitTextFromConnection(0, "{\"channel\":\"pong\"}");
+
+    assertTrue(fixture.listener.frames.isEmpty());
+  }
+
+  @Test
+  public void initialHandshakeTimeoutFailsWithoutSchedulingReconnect() {
+    Fixture fixture = new Fixture();
+
+    fixture.connector.start(HyperliquidEnvironment.MAINNET);
+    fixture.transport.completeMeta(200, validMeta("BTC"));
+    fixture.clock.now = 10_000L;
+    fixture.scheduler.advanceBy(10_000L);
+
+    assertEquals(1, fixture.listener.initialFailures.size());
+    assertEquals(TransportFailure.Kind.NETWORK, fixture.listener.initialFailures.get(0).kind());
+    assertEquals(-1L, fixture.scheduler.nextDelayMillis());
+  }
+
+  @Test
+  public void synchronousSocketSendFailureStartsOneReconnect() {
+    Fixture fixture = new Fixture();
+    fixture.startAndOpen();
+    fixture.transport.socket().throwOnNextSend(new IllegalStateException("send broke"));
+
+    fixture.connector.subscribe(new SubscriptionKey("BTC", SubscriptionType.L2_BOOK), 20_000L);
+
+    assertEquals(1_000L, fixture.scheduler.nextDelayMillis());
+  }
+
+  @Test
+  public void reconnectBackoffResetsOnlyAfterListenerMarksGenerationHealthy() {
+    Fixture fixture = new Fixture();
+    fixture.startAndOpen();
+    fixture.connector.subscribe(new SubscriptionKey("BTC", SubscriptionType.L2_BOOK), 20_000L);
+    fixture.transport.socket().succeedNextSend();
+
+    fixture.transport.remoteClose(1006, "first");
+    assertEquals(1_000L, fixture.scheduler.nextDelayMillis());
+    fixture.advanceAndOpen(1_000L);
+    fixture.transport.socket().succeedNextSend();
+    fixture.transport.remoteClose(1006, "second");
+    assertEquals(2_000L, fixture.scheduler.nextDelayMillis());
+    fixture.advanceAndOpen(2_000L);
+    fixture.transport.socket().succeedNextSend();
+    fixture.connector.markHealthy(fixture.listener.lastGeneration);
+    fixture.transport.remoteClose(1006, "third");
+
+    assertEquals(1_000L, fixture.scheduler.nextDelayMillis());
+  }
+
+  @Test
+  public void closeCancelsConnectAndEveryOutstandingTimer() {
+    Fixture fixture = new Fixture();
+    fixture.connector.start(HyperliquidEnvironment.MAINNET);
+    fixture.transport.completeMeta(200, validMeta("BTC"));
+
+    fixture.connector.close();
+
+    assertTrue(fixture.transport.connectCancelled());
+    assertEquals(-1L, fixture.scheduler.nextDelayMillis());
+  }
+
+  @Test
+  public void staleGenerationRawFrameIsNotForwardedAfterReconnect() {
+    Fixture fixture = new Fixture();
+    fixture.startAndOpen();
+
+    fixture.transport.remoteClose(1006, "lost");
+    fixture.advanceAndOpen(1_000L);
+    fixture.transport.emitTextFromConnection(0, "{\"channel\":\"pong\"}");
+
+    assertTrue(fixture.listener.frames.isEmpty());
+  }
+
+  @Test
+  public void initialSocketSlotExhaustionBecomesFatalAfterTenSeconds() {
+    HyperliquidProcessBudget budget = newBudget(1, 2, 5, 2);
+    ConnectionPermit holder = budget.tryAcquireConnection(0L, 0).permit();
+    Fixture fixture = new Fixture(budget);
+
+    fixture.connector.start(HyperliquidEnvironment.MAINNET);
+    fixture.transport.completeMeta(200, validMeta("BTC"));
+    fixture.clock.now = 10_000L;
+    fixture.scheduler.advanceBy(10_000L);
+
+    assertEquals(1, fixture.listener.initialFailures.size());
+    assertEquals(TransportFailure.Kind.PROTOCOL, fixture.listener.initialFailures.get(0).kind());
+    holder.close();
+  }
+
+  @Test
+  public void initialRollingAttemptLimitWaitDoesNotBecomeSocketSlotFatal() {
+    HyperliquidProcessBudget budget = newBudget(1, 1, 5, 2);
+    ConnectionPermit earlierAttempt = budget.tryAcquireConnection(0L, 0).permit();
+    earlierAttempt.close();
+    Fixture fixture = new Fixture(budget);
+
+    fixture.connector.start(HyperliquidEnvironment.MAINNET);
+    fixture.transport.completeMeta(200, validMeta("BTC"));
+    fixture.clock.now = 10_000L;
+    fixture.scheduler.advanceBy(10_000L);
+
+    assertTrue(fixture.listener.initialFailures.isEmpty());
+    assertEquals(50_000L, fixture.scheduler.nextDelayMillis());
+  }
+
+  @Test
+  public void failedAsyncWriteStartsOneReconnect() {
+    Fixture fixture = new Fixture();
+    fixture.startAndOpen();
+    fixture.connector.subscribe(new SubscriptionKey("BTC", SubscriptionType.L2_BOOK), 20_000L);
+
+    fixture.transport.socket().failNextSend(new IllegalStateException("write broke"));
+
+    assertEquals(1_000L, fixture.scheduler.nextDelayMillis());
+  }
+
+  @Test
+  public void reconnectReservationIsReplacedWhenAConnectionSubscriptionIsRemoved() {
+    HyperliquidProcessBudget budget = newBudget(2, 10, 5, 2);
+    Fixture fixture = new Fixture(budget);
+    SubscriptionKey book = new SubscriptionKey("BTC", SubscriptionType.L2_BOOK);
+    SubscriptionKey trades = new SubscriptionKey("BTC", SubscriptionType.TRADES);
+    fixture.startAndOpen();
+    fixture.connector.subscribe(book, 20_000L);
+    fixture.transport.socket().succeedNextSend();
+    fixture.connector.subscribe(trades, 20_000L);
+    fixture.transport.socket().succeedNextSend();
+    fixture.transport.remoteClose(1006, "lost");
+    fixture.clock.now = 1_000L;
+    fixture.scheduler.advanceBy(1_000L);
+
+    fixture.connector.unsubscribe(trades);
+    FrameReservation available = budget.tryAcquireFrames(1_000L, 1).permit();
+
+    assertTrue(available != null);
+    available.close();
+    fixture.connector.close();
+  }
+
+  @Test
+  public void frameBudgetRetrySendsAfterCapacityIsReleased() {
+    HyperliquidProcessBudget budget = newBudget(2, 2, 1, 2);
+    FrameReservation held = budget.tryAcquireFrames(0L, 1).permit();
+    Fixture fixture = new Fixture(budget);
+    fixture.startAndOpen();
+
+    fixture.connector.subscribe(new SubscriptionKey("BTC", SubscriptionType.L2_BOOK), 20_000L);
+    held.close();
+    fixture.clock.now = 10L;
+    fixture.scheduler.advanceBy(10L);
+
+    assertEquals(1, fixture.transport.socket().pendingSendCount());
+    fixture.connector.close();
+  }
+
+  @Test
+  public void closeCancelsFrameBudgetRetryTimer() {
+    HyperliquidProcessBudget budget = newBudget(2, 2, 1, 2);
+    FrameReservation held = budget.tryAcquireFrames(0L, 1).permit();
+    Fixture fixture = new Fixture(budget);
+    fixture.startAndOpen();
+    fixture.connector.subscribe(new SubscriptionKey("BTC", SubscriptionType.L2_BOOK), 20_000L);
+
+    fixture.connector.close();
+    held.close();
+
+    assertEquals(-1L, fixture.scheduler.nextDelayMillis());
+  }
+
+  @Test
+  public void closeCancelsHeartbeatPongAndReconnectTimers() {
+    Fixture fixture = new Fixture();
+    fixture.startAndOpen();
+    fixture.clock.now = 30_000L;
+    fixture.scheduler.advanceBy(30_000L);
+    fixture.transport.socket().succeedNextSend();
+
+    fixture.connector.close();
+
+    assertEquals(-1L, fixture.scheduler.nextDelayMillis());
+  }
+
   private static String validMeta(String coin) {
     return "{\"universe\":[{\"name\":\"" + coin + "\",\"szDecimals\":2}]}";
+  }
+
+  private static HyperliquidProcessBudget newBudget(
+      int connections, int attempts, int frames, int subscriptions) {
+    try {
+      Constructor<HyperliquidProcessBudget> constructor =
+          HyperliquidProcessBudget.class.getDeclaredConstructor(
+              Integer.TYPE, Integer.TYPE, Integer.TYPE, Integer.TYPE, Long.TYPE);
+      constructor.setAccessible(true);
+      return constructor.newInstance(connections, attempts, frames, subscriptions, 60_000L);
+    } catch (Exception failure) {
+      throw new AssertionError("unable to construct deterministic test budget", failure);
+    }
   }
 
   private static final class Fixture {
@@ -166,21 +372,26 @@ public class HyperliquidConnectorTest {
     private final HyperliquidConnector connector;
 
     private Fixture() {
+      this(HyperliquidProcessBudget.shared());
+    }
+
+    private Fixture(HyperliquidProcessBudget budget) {
       Consumer<Runnable> directStateLane = Runnable::run;
       connector =
           new HyperliquidConnector(
-              transport,
-              new HyperliquidMetaParser(),
-              HyperliquidProcessBudget.shared(),
-              scheduler,
-              clock,
-              directStateLane);
+              transport, new HyperliquidMetaParser(), budget, scheduler, clock, directStateLane);
       connector.setListener(listener);
     }
 
     private void startAndOpen() {
       connector.start(HyperliquidEnvironment.MAINNET);
       transport.completeMeta(200, validMeta("BTC"));
+      transport.openSocket();
+    }
+
+    private void advanceAndOpen(long elapsedMillis) {
+      clock.now += elapsedMillis;
+      scheduler.advanceBy(elapsedMillis);
       transport.openSocket();
     }
   }
@@ -198,6 +409,8 @@ public class HyperliquidConnectorTest {
     private final List<String> instrumentNames = new ArrayList<String>();
     private final List<TransportFailure> initialFailures = new ArrayList<TransportFailure>();
     private final List<Long> sentTimes = new ArrayList<Long>();
+    private final List<String> frames = new ArrayList<String>();
+    private long lastGeneration;
 
     @Override
     public void onMetadata(List<PerpetualInstrument> instruments) {
@@ -213,12 +426,12 @@ public class HyperliquidConnectorTest {
 
     @Override
     public void onSocketOpened(long generation) {
-      // This test does not need the open notification.
+      lastGeneration = generation;
     }
 
     @Override
     public void onFrame(long generation, String json) {
-      // This test does not need raw frames.
+      frames.add(json);
     }
 
     @Override
