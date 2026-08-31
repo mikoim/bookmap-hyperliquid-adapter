@@ -109,6 +109,21 @@ public class HyperliquidProcessBudgetTest {
   }
 
   @Test
+  public void reportsAnImmediateRetryWhenHeldFramesAreTheOnlyFrameBlocker() {
+    HyperliquidProcessBudget budget = new HyperliquidProcessBudget(2, 2, 4, 2, 60_000);
+    FrameReservation sent = budget.tryAcquireFrames(0, 1).permit();
+    FrameReservation held = budget.tryAcquireFrames(1, 3).permit();
+    assertTrue(sent.takeFrame(0));
+
+    Decision<FrameReservation> rejected = budget.tryAcquireFrames(2, 1);
+
+    assertFalse(rejected.acquired());
+    assertEquals(2, rejected.retryAtMillis());
+    held.close();
+    assertTrue(budget.tryAcquireFrames(2, 1).acquired());
+  }
+
+  @Test
   public void rejectsAFrameRequestBeyondTheHardLimitWithoutMutation() {
     HyperliquidProcessBudget budget = new HyperliquidProcessBudget(2, 2, 2, 2, 60_000);
 

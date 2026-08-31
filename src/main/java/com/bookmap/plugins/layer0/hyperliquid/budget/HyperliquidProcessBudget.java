@@ -123,7 +123,7 @@ public final class HyperliquidProcessBudget {
 
   private long earliestFrameRetryAt(long nowMillis, int frames) {
     synchronized (lock) {
-      return earliestDequeRetryAt(sentFrameTimestamps, maxFrames - heldFrames, frames, nowMillis);
+      return earliestDequeRetryAt(sentFrameTimestamps, maxFrames, frames, nowMillis);
     }
   }
 
