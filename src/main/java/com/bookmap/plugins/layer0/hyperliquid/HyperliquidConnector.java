@@ -18,6 +18,7 @@ import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
@@ -69,6 +70,8 @@ public final class HyperliquidConnector implements AutoCloseable {
   private final Consumer<Runnable> stateSubmitter;
   private final TreeMap<SubscriptionKey, SubscriptionKey> desired =
       new TreeMap<SubscriptionKey, SubscriptionKey>();
+  private final TreeMap<SubscriptionKey, Long> activationDeadlines =
+      new TreeMap<SubscriptionKey, Long>();
   private final List<PendingSend> pendingSends = new ArrayList<PendingSend>();
 
   private Listener listener;
@@ -153,6 +156,11 @@ public final class HyperliquidConnector implements AutoCloseable {
               return;
             }
             desired.put(key, key);
+            activationDeadlines.put(key, Long.valueOf(activationDeadlineMillis));
+            if (isReconnectOpening()) {
+              replaceReconnectOpening();
+              return;
+            }
             if (socketOpened) {
               sendWhenPossible(
                   new OutboundMessage(OutboundMessage.Kind.SUBSCRIBE, key, key.subscribeJson()),
@@ -174,6 +182,7 @@ public final class HyperliquidConnector implements AutoCloseable {
               return;
             }
             desired.remove(key);
+            activationDeadlines.remove(key);
             cancelSubscriptionSends(key);
             if (isReconnectOpening()) {
               replaceReconnectOpening();
@@ -438,6 +447,7 @@ public final class HyperliquidConnector implements AutoCloseable {
       openedSocket.close(1000, "stale connector generation");
       return;
     }
+    removeExpiredSubscriptions(clock.getAsLong());
     if (!openingInitial && connectionPermit.reservedFramesRemaining() > desired.size() + 1) {
       openedSocket.close(1000, "reconnect reservation changed");
       replaceReconnectOpening();
@@ -455,7 +465,7 @@ public final class HyperliquidConnector implements AutoCloseable {
         sendWhenPossible(
             new OutboundMessage(OutboundMessage.Kind.SUBSCRIBE, key, key.subscribeJson()),
             openingGeneration,
-            Long.MAX_VALUE,
+            activationDeadlineFor(key),
             connectionPermit);
       }
       if (desired.isEmpty()) {
@@ -466,7 +476,7 @@ public final class HyperliquidConnector implements AutoCloseable {
         sendWhenPossible(
             new OutboundMessage(OutboundMessage.Kind.SUBSCRIBE, key, key.subscribeJson()),
             openingGeneration,
-            Long.MAX_VALUE,
+            activationDeadlineFor(key),
             null);
       }
     }
@@ -499,6 +509,10 @@ public final class HyperliquidConnector implements AutoCloseable {
     }
     long now = clock.getAsLong();
     if (now >= activationDeadlineMillis) {
+      if (message.kind() == OutboundMessage.Kind.SUBSCRIBE) {
+        desired.remove(message.subscription());
+        activationDeadlines.remove(message.subscription());
+      }
       return;
     }
     if (reservedConnection != null) {
@@ -600,6 +614,8 @@ public final class HyperliquidConnector implements AutoCloseable {
     if (pending.message.kind() == OutboundMessage.Kind.PING) {
       lastPingAtMillis = sentAtMillis;
       schedulePongDeadline(pending.generation);
+    } else if (pending.message.kind() == OutboundMessage.Kind.SUBSCRIBE) {
+      activationDeadlines.remove(pending.message.subscription());
     }
     listener.onFrameSent(pending.generation, pending.message, sentAtMillis);
   }
@@ -771,6 +787,25 @@ public final class HyperliquidConnector implements AutoCloseable {
       return desired.containsKey(message.subscription());
     }
     return true;
+  }
+
+  private long activationDeadlineFor(SubscriptionKey key) {
+    Long deadline = activationDeadlines.get(key);
+    return deadline == null ? Long.MAX_VALUE : deadline.longValue();
+  }
+
+  private void removeExpiredSubscriptions(long nowMillis) {
+    List<SubscriptionKey> expired = new ArrayList<SubscriptionKey>();
+    for (Map.Entry<SubscriptionKey, Long> entry : activationDeadlines.entrySet()) {
+      if (nowMillis >= entry.getValue().longValue()) {
+        expired.add(entry.getKey());
+      }
+    }
+    for (SubscriptionKey key : expired) {
+      desired.remove(key);
+      activationDeadlines.remove(key);
+      cancelSubscriptionSends(key);
+    }
   }
 
   private void cancelSubscriptionSends(SubscriptionKey key) {

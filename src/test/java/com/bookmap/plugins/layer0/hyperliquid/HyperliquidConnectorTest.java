@@ -1,6 +1,7 @@
 package com.bookmap.plugins.layer0.hyperliquid;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import com.bookmap.plugins.layer0.hyperliquid.HyperliquidConnector.Listener;
@@ -302,6 +303,59 @@ public class HyperliquidConnectorTest {
     assertTrue(available != null);
     available.close();
     fixture.connector.close();
+  }
+
+  @Test
+  public void reconnectReservationIsReplacedWhenAConnectionSubscriptionIsAdded() {
+    HyperliquidProcessBudget budget = newBudget(2, 10, 4, 2);
+    Fixture fixture = new Fixture(budget);
+    SubscriptionKey book = new SubscriptionKey("BTC", SubscriptionType.L2_BOOK);
+    SubscriptionKey trades = new SubscriptionKey("BTC", SubscriptionType.TRADES);
+    fixture.startAndOpen();
+    fixture.connector.subscribe(book, 20_000L);
+    fixture.transport.socket().succeedNextSend();
+    fixture.transport.remoteClose(1006, "lost");
+    fixture.clock.now = 1_000L;
+    fixture.scheduler.advanceBy(1_000L);
+
+    fixture.connector.subscribe(trades, 20_000L);
+    assertEquals(3, fixture.transport.connectCalls().size());
+    assertFalse(budget.tryAcquireFrames(1_000L, 1).acquired());
+    fixture.transport.openSocket();
+    fixture.transport.socket().succeedNextSend();
+    fixture.transport.socket().succeedNextSend();
+    fixture.clock.now = 31_000L;
+    fixture.scheduler.advanceBy(30_000L);
+
+    assertEquals(1, fixture.transport.socket().pendingSendCount());
+    fixture.connector.close();
+  }
+
+  @Test
+  public void expiredAddedSubscriptionIsNotReplayedAfterReconnectReplacement() {
+    HyperliquidProcessBudget budget = newBudget(2, 10, 4, 2);
+    Fixture fixture = new Fixture(budget);
+    SubscriptionKey book = new SubscriptionKey("BTC", SubscriptionType.L2_BOOK);
+    SubscriptionKey trades = new SubscriptionKey("BTC", SubscriptionType.TRADES);
+    fixture.startAndOpen();
+    fixture.connector.subscribe(book, 20_000L);
+    fixture.transport.socket().succeedNextSend();
+    fixture.transport.remoteClose(1006, "lost");
+    fixture.clock.now = 1_000L;
+    fixture.scheduler.advanceBy(1_000L);
+
+    fixture.connector.subscribe(trades, 1_500L);
+    fixture.clock.now = 2_000L;
+    fixture.transport.openSocket();
+    fixture.transport.openSocket();
+
+    assertEquals(1, fixture.transport.socket().pendingSendCount());
+    fixture.transport.socket().succeedNextSend();
+
+    assertTrue(fixture.transport.socket().successfulSendBodies().contains(book.subscribeJson()));
+    assertFalse(fixture.transport.socket().successfulSendBodies().contains(trades.subscribeJson()));
+    fixture.connector.close();
+    assertTrue(budget.tryAcquireFrames(2_000L, 2).acquired());
   }
 
   @Test
