@@ -1,0 +1,153 @@
+package com.bookmap.plugins.layer0.hyperliquid.transport;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Proxy;
+import java.util.concurrent.atomic.AtomicReference;
+import org.eclipse.jetty.websocket.api.RemoteEndpoint;
+import org.eclipse.jetty.websocket.api.Session;
+import org.eclipse.jetty.websocket.api.WriteCallback;
+import org.junit.Test;
+
+/** Pins the Jetty 9.3 remote-endpoint boundary without an external WebSocket server. */
+public class JettyHyperliquidTransportContractTest {
+
+  @Test
+  public void socketDelegatesExactBodyAndWriteCallbacksOnce() {
+    final AtomicReference<String> sent = new AtomicReference<String>();
+    final AtomicReference<WriteCallback> write = new AtomicReference<WriteCallback>();
+    RemoteEndpoint remote =
+        proxy(
+            RemoteEndpoint.class,
+            (proxy, method, arguments) -> {
+              if ("sendString".equals(method.getName()) && arguments.length == 2) {
+                sent.set((String) arguments[0]);
+                write.set((WriteCallback) arguments[1]);
+              }
+              return defaultValue(method.getReturnType());
+            });
+    Session session =
+        session(remote, true, new AtomicReference<Integer>(), new AtomicReference<String>());
+    JettySocket socket = new JettySocket(session);
+    final int[] successful = new int[1];
+    final int[] failed = new int[1];
+
+    socket.send(
+        "{\"method\":\"ping\"}",
+        new HyperliquidTransport.SendCallback() {
+          @Override
+          public void onSuccess() {
+            successful[0]++;
+          }
+
+          @Override
+          public void onFailure(Throwable failure) {
+            failed[0]++;
+          }
+        });
+    write.get().writeSuccess();
+    write.get().writeSuccess();
+    write.get().writeFailed(new IllegalStateException("late"));
+
+    assertEquals("{\"method\":\"ping\"}", sent.get());
+    assertEquals(1, successful[0]);
+    assertEquals(0, failed[0]);
+  }
+
+  @Test
+  public void socketDelegatesFailureCloseAndOpenState() {
+    final AtomicReference<WriteCallback> write = new AtomicReference<WriteCallback>();
+    final AtomicReference<Integer> closeCode = new AtomicReference<Integer>();
+    final AtomicReference<String> closeReason = new AtomicReference<String>();
+    RemoteEndpoint remote =
+        proxy(
+            RemoteEndpoint.class,
+            (proxy, method, arguments) -> {
+              if ("sendString".equals(method.getName()) && arguments.length == 2) {
+                write.set((WriteCallback) arguments[1]);
+              }
+              return defaultValue(method.getReturnType());
+            });
+    JettySocket socket = new JettySocket(session(remote, false, closeCode, closeReason));
+    final int[] failures = new int[1];
+
+    socket.send(
+        "body",
+        new HyperliquidTransport.SendCallback() {
+          @Override
+          public void onSuccess() {
+            // The failure path is the behavior under test.
+          }
+
+          @Override
+          public void onFailure(Throwable failure) {
+            failures[0]++;
+          }
+        });
+    write.get().writeFailed(new IllegalArgumentException("bad"));
+    write.get().writeFailed(new IllegalArgumentException("late"));
+    socket.close(1001, "shutdown");
+
+    assertEquals(1, failures[0]);
+    assertEquals(Integer.valueOf(1001), closeCode.get());
+    assertEquals("shutdown", closeReason.get());
+    assertFalse(socket.isOpen());
+  }
+
+  @Test
+  public void socketMirrorsOpenJettySession() {
+    RemoteEndpoint remote =
+        proxy(
+            RemoteEndpoint.class,
+            (proxy, method, arguments) -> defaultValue(method.getReturnType()));
+
+    assertTrue(
+        new JettySocket(
+                session(
+                    remote, true, new AtomicReference<Integer>(), new AtomicReference<String>()))
+            .isOpen());
+  }
+
+  private static Session session(
+      final RemoteEndpoint remote,
+      final boolean open,
+      final AtomicReference<Integer> closeCode,
+      final AtomicReference<String> closeReason) {
+    return proxy(
+        Session.class,
+        (proxy, method, arguments) -> {
+          if ("getRemote".equals(method.getName())) {
+            return remote;
+          }
+          if ("isOpen".equals(method.getName())) {
+            return Boolean.valueOf(open);
+          }
+          if ("close".equals(method.getName()) && arguments != null && arguments.length == 2) {
+            closeCode.set((Integer) arguments[0]);
+            closeReason.set((String) arguments[1]);
+          }
+          return defaultValue(method.getReturnType());
+        });
+  }
+
+  @SuppressWarnings("unchecked")
+  private static <T> T proxy(Class<T> type, InvocationHandler handler) {
+    return (T) Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[] {type}, handler);
+  }
+
+  private static Object defaultValue(Class<?> type) {
+    if (!type.isPrimitive()) {
+      return null;
+    }
+    if (type == Boolean.TYPE) {
+      return Boolean.FALSE;
+    }
+    if (type == Character.TYPE) {
+      return Character.valueOf('\0');
+    }
+    return Integer.valueOf(0);
+  }
+}
