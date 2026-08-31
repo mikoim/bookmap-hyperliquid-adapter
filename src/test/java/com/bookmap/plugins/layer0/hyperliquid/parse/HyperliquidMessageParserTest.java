@@ -112,6 +112,20 @@ public class HyperliquidMessageParserTest {
   }
 
   @Test
+  public void rejectsInvalidBookTimeCoinAndLevelStructures() {
+    assertInvalid(l2BookWith("\"coin\":\"BTC\",\"time\":1.5,\"levels\":[[],[]]"));
+    assertInvalid(l2BookWith("\"coin\":\"BTC\",\"time\":-1,\"levels\":[[],[]]"));
+    assertInvalid(l2BookWith("\"coin\":1,\"time\":1,\"levels\":[[],[]]"));
+    assertInvalid(l2BookWith("\"coin\":\"  \",\"time\":1,\"levels\":[[],[]]"));
+    assertInvalid(l2BookWith("\"coin\":\"BTC\",\"time\":1"));
+    assertInvalid(l2BookWith("\"coin\":\"BTC\",\"time\":1,\"levels\":{}"));
+    assertInvalid(l2BookWith("\"coin\":\"BTC\",\"time\":1,\"levels\":[[]]"));
+    assertInvalid(l2BookWith("\"coin\":\"BTC\",\"time\":1,\"levels\":[[],[],[]]"));
+    assertInvalid(l2BookWith("\"coin\":\"BTC\",\"time\":1,\"levels\":[{},[]]"));
+    assertInvalid(l2BookWith("\"coin\":\"BTC\",\"time\":1,\"levels\":[[1],[]]"));
+  }
+
+  @Test
   public void returnsSubscriptionAckAsControlEvent() {
     ParsedFrame frame =
         parser.parse(
@@ -168,6 +182,24 @@ public class HyperliquidMessageParserTest {
   }
 
   @Test
+  public void leavesStructuredErrorUntargetedWhenSubscriptionDefinitionIsNotExact() {
+    ParsedFrame extraField =
+        parser.parse(
+            "{\"channel\":\"error\",\"data\":{\"subscription\":{"
+                + "\"type\":\"trades\",\"coin\":\"BTC\",\"dex\":\"x\"}}}");
+    ParsedFrame unsupportedType =
+        parser.parse(
+            "{\"channel\":\"error\",\"data\":{\"subscription\":{"
+                + "\"type\":\"candle\",\"coin\":\"BTC\"}}}");
+
+    assertEquals(ControlEvent.Kind.SUBSCRIPTION_ERROR, extraField.controlEvents().get(0).kind());
+    assertNull(extraField.controlEvents().get(0).target());
+    assertEquals(
+        ControlEvent.Kind.SUBSCRIPTION_ERROR, unsupportedType.controlEvents().get(0).kind());
+    assertNull(unsupportedType.controlEvents().get(0).target());
+  }
+
+  @Test
   public void treatsUnknownAndMalformedFramesAsNonThrowingResults() {
     ParsedFrame unknown = parser.parse("{\"channel\":\"futureChannel\",\"data\":{}}");
     ParsedFrame malformed = parser.parse("{");
@@ -178,6 +210,18 @@ public class HyperliquidMessageParserTest {
     assertTrue(malformed.marketEvents().isEmpty());
     assertFalse(unknown.diagnostics().isEmpty());
     assertFalse(malformed.diagnostics().isEmpty());
+  }
+
+  @Test
+  public void rejectsMalformedTopLevelAndChannelDataShapesWithoutThrowing() {
+    assertInvalid(null);
+    assertInvalid("null");
+    assertInvalid("[]");
+    assertInvalid("true");
+    assertInvalid("{\"channel\":true}");
+    assertInvalid("{\"channel\":\"trades\",\"data\":null}");
+    assertInvalid("{\"channel\":\"l2Book\",\"data\":[]}");
+    assertInvalid("{\"channel\":\"subscriptionResponse\",\"data\":\"ack\"}");
   }
 
   private void assertInvalidTrade(String trade) {
@@ -201,6 +245,10 @@ public class HyperliquidMessageParserTest {
     appendLevels(json, askPrice, count);
     json.append("]]}}");
     return json.toString();
+  }
+
+  private String l2BookWith(String dataFields) {
+    return "{\"channel\":\"l2Book\",\"data\":{" + dataFields + "}}";
   }
 
   private void appendLevels(StringBuilder json, String price, int count) {
