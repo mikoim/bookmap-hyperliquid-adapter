@@ -37,6 +37,9 @@ public final class OrderBookSnapshotDiff {
     if (snapshot == null) {
       return invalid("Snapshot is missing");
     }
+    if (snapshot.time() < 0) {
+      return invalid("Snapshot time is invalid");
+    }
     if (snapshot.time() < lastAcceptedTime) {
       return new SnapshotValidation(SnapshotValidation.Status.STALE, null, "Snapshot is older");
     }

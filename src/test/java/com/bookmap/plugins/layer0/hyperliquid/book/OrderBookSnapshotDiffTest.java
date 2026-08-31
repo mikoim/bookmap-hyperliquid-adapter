@@ -82,6 +82,15 @@ public class OrderBookSnapshotDiffTest {
   }
 
   @Test
+  public void rejectsNegativeSnapshotTimesEvenWithTheAcceptedTimeSentinel() {
+    SnapshotValidation validation =
+        diff.validate(snapshot(-1, bids(level("100", "1")), asks()), -1);
+
+    assertEquals(SnapshotValidation.Status.INVALID, validation.status());
+    assertNull(validation.snapshot());
+  }
+
+  @Test
   public void rejectsTrailingZeroPricesThatNormalizeToTheSameInteger() {
     SnapshotValidation validation =
         diff.validate(snapshot(10, bids(level("100", "1"), level("100.0", "2")), asks()), -1);
