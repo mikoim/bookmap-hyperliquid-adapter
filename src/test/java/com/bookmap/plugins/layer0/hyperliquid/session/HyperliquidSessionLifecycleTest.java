@@ -14,6 +14,7 @@ import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionType;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMessageParser;
 import com.bookmap.plugins.layer0.hyperliquid.transport.TransportFailure;
 import java.lang.reflect.Constructor;
+import java.net.SocketTimeoutException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
@@ -56,6 +57,49 @@ public class HyperliquidSessionLifecycleTest {
   }
 
   @Test
+  public void metadataTimeoutIsClassifiedAsNoInternetAndDoesNotConnect() throws Exception {
+    Fixture fixture = new Fixture();
+    fixture.startLogin();
+    fixture.transport.failMeta(new SocketTimeoutException("metadata timeout"));
+    fixture.drain();
+
+    assertEquals(1, count(fixture.sink.events(), "login-failed:NO_INTERNET_CONNECTION"));
+    fixture.scheduler.advanceBy(120_000L);
+    fixture.drain();
+    assertTrue(fixture.transport.connectCalls().isEmpty());
+  }
+
+  @Test
+  public void metadataHttpFailureIsFatalAndDoesNotConnect() {
+    Fixture fixture = new Fixture();
+    fixture.startLogin();
+    fixture.transport.completeMeta(503, "unavailable");
+    fixture.drain();
+
+    assertEquals(1, count(fixture.sink.events(), "login-failed:FATAL"));
+    fixture.scheduler.advanceBy(120_000L);
+    fixture.drain();
+    assertTrue(fixture.transport.connectCalls().isEmpty());
+  }
+
+  @Test
+  public void initialHandshakeTimeoutIsNoInternetAndDoesNotReconnect() {
+    Fixture fixture = new Fixture();
+    fixture.startLogin();
+    fixture.transport.completeMeta(200, "{\"universe\":[{\"name\":\"BTC\",\"szDecimals\":2}]}");
+    fixture.drain();
+    fixture.clock.now = 10_000L;
+    fixture.scheduler.advanceBy(10_000L);
+    fixture.drain();
+
+    assertEquals(1, count(fixture.sink.events(), "login-failed:NO_INTERNET_CONNECTION"));
+    assertEquals(1, fixture.transport.connectCalls().size());
+    fixture.scheduler.advanceBy(120_000L);
+    fixture.drain();
+    assertEquals(1, fixture.transport.connectCalls().size());
+  }
+
+  @Test
   public void restorationWaitsForEveryCurrentGenerationAck() {
     Fixture fixture = new Fixture();
     fixture.login();
@@ -82,6 +126,47 @@ public class HyperliquidSessionLifecycleTest {
     fixture.ack(SubscriptionType.TRADES);
     fixture.drain();
     assertEquals(1, count(fixture.sink.events(), "connection-restored"));
+  }
+
+  @Test
+  public void multiAliasRestorationWaitsForEveryDefinitionAndIgnoresOldGeneration() {
+    Fixture fixture = new Fixture();
+    fixture.loginWithSymbols(2);
+    fixture.subscribe("BTC");
+    fixture.subscribe("C1");
+    fixture.completeSends(4);
+    fixture.book("BTC", "100.000", 1L);
+    fixture.book("C1", "100.000", 1L);
+    fixture.ack("BTC", SubscriptionType.L2_BOOK);
+    fixture.ack("BTC", SubscriptionType.TRADES);
+    fixture.ack("C1", SubscriptionType.L2_BOOK);
+    fixture.ack("C1", SubscriptionType.TRADES);
+    fixture.drain();
+    fixture.sink.events().clear();
+
+    fixture.transport.remoteClose(1006, "lost");
+    fixture.drain();
+    fixture.scheduler.advanceBy(1_000L);
+    fixture.drain();
+    fixture.transport.openSocket();
+    fixture.generation = 2L;
+    fixture.drain();
+    fixture.completeSends(4);
+    fixture.book("BTC", "101.000", 2L);
+    fixture.session.onFrame(
+        1L,
+        "{\"channel\":\"trades\",\"data\":[{\"coin\":\"BTC\",\"side\":\"B\","
+            + "\"px\":\"102.000\",\"sz\":\"1\",\"time\":3,\"tid\":99}]}");
+    fixture.drain();
+    fixture.ack("BTC", SubscriptionType.L2_BOOK);
+    fixture.ack("BTC", SubscriptionType.TRADES);
+    fixture.ack("C1", SubscriptionType.L2_BOOK);
+    fixture.drain();
+    assertEquals(0, count(fixture.sink.events(), "connection-restored"));
+    fixture.ack("C1", SubscriptionType.TRADES);
+    fixture.drain();
+    assertEquals(1, count(fixture.sink.events(), "connection-restored"));
+    assertEquals(0, fixture.sink.trades().size());
   }
 
   @Test
@@ -227,6 +312,33 @@ public class HyperliquidSessionLifecycleTest {
     assertEquals(1, count(fixture.sink.events(), "connection-lost:UNKNOWN"));
   }
 
+  @Test
+  public void delayedWriteCallbackKeepsAckDeadlineAnchoredToSendStart() {
+    Fixture fixture = new Fixture();
+    fixture.login();
+    fixture.subscribe("BTC");
+    fixture.completeSends(2);
+    fixture.book(1L);
+    fixture.ack(SubscriptionType.L2_BOOK);
+    fixture.ack(SubscriptionType.TRADES);
+    fixture.drain();
+
+    fixture.transport.remoteClose(1006, "lost");
+    fixture.drain();
+    fixture.scheduler.advanceBy(1_000L);
+    fixture.drain();
+    fixture.transport.openSocket();
+    fixture.generation = 2L;
+    fixture.drain();
+    fixture.scheduler.advanceBy(9_999L);
+    fixture.transport.socket().succeedNextSend();
+    fixture.drain();
+    fixture.scheduler.advanceBy(1L);
+    fixture.drain();
+
+    assertEquals(0, count(fixture.sink.events(), "connection-restored"));
+  }
+
   private static int count(List<String> values, String expected) {
     int count = 0;
     for (String value : values) {
@@ -292,8 +404,22 @@ public class HyperliquidSessionLifecycleTest {
             });
 
     private void login() {
+      loginWithSymbols(1);
+    }
+
+    private void loginWithSymbols(int count) {
       startLogin();
-      transport.completeMeta(200, "{\"universe\":[{\"name\":\"BTC\",\"szDecimals\":2}]}");
+      StringBuilder metadata = new StringBuilder("{\"universe\":[");
+      for (int index = 0; index < count; index++) {
+        if (index > 0) {
+          metadata.append(',');
+        }
+        metadata.append("{\"name\":\"");
+        metadata.append(index == 0 ? "BTC" : "C" + index);
+        metadata.append("\",\"szDecimals\":2}");
+      }
+      metadata.append("]}");
+      transport.completeMeta(200, metadata.toString());
       drain();
       transport.openSocket();
       drain();
@@ -317,13 +443,19 @@ public class HyperliquidSessionLifecycleTest {
     }
 
     private void book(long time) {
-      book("100.000", time);
+      book("BTC", "100.000", time);
     }
 
     private void book(String price, long time) {
+      book("BTC", price, time);
+    }
+
+    private void book(String coin, String price, long time) {
       session.onFrame(
           generation,
-          "{\"channel\":\"l2Book\",\"data\":{\"coin\":\"BTC\",\"time\":"
+          "{\"channel\":\"l2Book\",\"data\":{\"coin\":\""
+              + coin
+              + "\",\"time\":"
               + time
               + ",\"levels\":[[{\"px\":\""
               + price
@@ -342,12 +474,18 @@ public class HyperliquidSessionLifecycleTest {
     }
 
     private void ack(SubscriptionType type) {
+      ack("BTC", type);
+    }
+
+    private void ack(String coin, SubscriptionType type) {
       session.onFrame(
           generation,
           "{\"channel\":\"subscriptionResponse\",\"data\":{\"method\":\"subscribe\","
               + "\"subscription\":{\"type\":\""
               + type.wireName()
-              + "\",\"coin\":\"BTC\"}}}");
+              + "\",\"coin\":\""
+              + coin
+              + "\"}}}");
     }
 
     private void drain() {
