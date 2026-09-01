@@ -55,7 +55,11 @@ public class ProviderEndToEndTest {
 
     assertEquals(
         Arrays.asList(
-            "login", "added:BTC", "depth:BTC:1000000:100", "depth:BTC:1010000:200", "trade:BTC"),
+            "login",
+            "added:BTC",
+            "depth:BTC:1000000:100",
+            "depth:BTC:1010000:200",
+            "trade:BTC:1000000"),
         fixture.trace);
     assertEquals("https://api.hyperliquid.xyz/info", fixture.transport.httpUri().toString());
     assertEquals(
@@ -183,6 +187,7 @@ public class ProviderEndToEndTest {
     fixture.book("BTC", 0L, "100", "1", "101", "2");
     fixture.drain();
     assertEquals(depthsBeforeInvalid, fixture.data.depths.size());
+    int tradesBeforeOverflow = fixture.data.trades.size();
 
     for (int i = 0; i < 4_095; i++) {
       fixture.transport.emitTextFromConnection(
@@ -193,6 +198,9 @@ public class ProviderEndToEndTest {
     fixture.drain();
     assertTrue(fixture.admin.systemMessages.contains("market-data frame queue overflow"));
     assertEquals(depthsBeforeInvalid, fixture.data.depths.size());
+    assertEquals(tradesBeforeOverflow, fixture.data.trades.size());
+    assertFalse(fixture.trace.contains("trade:BTC:300"));
+    assertFalse(fixture.trace.contains("trade:BTC:301"));
     assertEquals(1, fixture.transport.connectCalls().size());
     assertEquals(1_000L, fixture.scheduler.nextDelayMillis());
     assertEquals(1, fixture.admin.connectionLostCount);
@@ -217,6 +225,9 @@ public class ProviderEndToEndTest {
         1, fixture.multiTradeJson("BTC", 30_000L, "400", "401", 9L, 10L));
     fixture.drain();
     assertEquals(2, count(fixture.admin.systemMessages, "market-data frame queue overflow"));
+    assertEquals(tradesBeforeOverflow, fixture.data.trades.size());
+    assertFalse(fixture.trace.contains("trade:BTC:400"));
+    assertFalse(fixture.trace.contains("trade:BTC:401"));
     fixture.closeTwice();
     fixture.assertClosed();
   }
@@ -243,7 +254,7 @@ public class ProviderEndToEndTest {
     fixture.trade("ETH", "A", "201", "1", 3L, 8L);
     fixture.drain();
     assertTrue(fixture.data.depths.contains("depth:ETH:2000000:200"));
-    assertTrue(fixture.trace.contains("trade:ETH"));
+    assertTrue(fixture.trace.contains("trade:ETH:2010000"));
 
     fixture.error(null);
     fixture.drain();
@@ -319,6 +330,72 @@ public class ProviderEndToEndTest {
     second.transport.openSocket();
     second.drain();
     second.closeTwice();
+    second.assertClosed();
+  }
+
+  @Test
+  public void sharedFrameWindowDefersProviderHeartbeatUntilExpiry() {
+    HyperliquidProcessBudget budget = budget(2, 20, 2, 2);
+    Fixture first = new Fixture(budget);
+    Fixture second = new Fixture(budget);
+    first.login(HyperliquidEnvironment.MAINNET);
+    first.subscribe("BTC");
+    first.completeSends();
+    first.ack("BTC", "l2Book");
+    first.ack("BTC", "trades");
+    first.book("BTC", 1L, "100", "1", "101", "2");
+    first.drain();
+
+    second.login(HyperliquidEnvironment.TESTNET);
+    second.advance(30_000L);
+    assertEquals(0, second.transport.socket().pendingSendCount());
+    first.closeTwice();
+    first.assertClosed(false);
+    second.advance(30_000L);
+    assertTrue(second.transport.socket().pendingSendCount() > 0);
+    second.completeSends();
+    assertTrue(second.transport.socket().successfulSendBodies().contains("{\"method\":\"ping\"}"));
+    second.closeTwice();
+    second.assertClosed();
+  }
+
+  @Test
+  public void sharedSubscriptionSlotsRejectThenRetryAfterOtherProviderUnsubscribes() {
+    HyperliquidProcessBudget budget = budget(2, 20, 20, 2);
+    Fixture first = new Fixture(budget);
+    Fixture second = new Fixture(budget);
+    first.login(HyperliquidEnvironment.MAINNET);
+    second.provider.login(Fixture.testnetLogin());
+    second.drain();
+    second.transport.completeMeta(200, metadata("BTC"));
+    second.drain();
+    second.transport.openSocket();
+    second.drain();
+
+    first.subscribe("BTC");
+    first.completeSends();
+    first.ack("BTC", "l2Book");
+    first.ack("BTC", "trades");
+    first.book("BTC", 1L, "100", "1", "101", "2");
+    first.drain();
+    second.subscribe("BTC");
+    assertTrue(second.admin.systemMessages.contains("Hyperliquid subscription limit reached"));
+    assertEquals(2, budget.reservedSubscriptionSlots());
+
+    first.provider.unsubscribe("BTC");
+    first.drain();
+    first.completeSends();
+    assertEquals(0, budget.reservedSubscriptionSlots());
+    second.subscribe("BTC");
+    second.completeSends();
+    second.ack("BTC", "l2Book");
+    second.ack("BTC", "trades");
+    second.book("BTC", 2L, "100", "1", "101", "2");
+    second.drain();
+    assertTrue(second.instruments.added.contains("BTC"));
+    first.closeTwice();
+    second.closeTwice();
+    first.assertClosed();
     second.assertClosed();
   }
 
@@ -547,6 +624,10 @@ public class ProviderEndToEndTest {
     }
 
     private void assertClosed() {
+      assertClosed(true);
+    }
+
+    private void assertClosed(boolean assertBudgetReleased) {
       assertTrue(executor.shutdownRequested);
       assertEquals(0, executor.queuedTaskCount());
       assertTrue(transport.closed());
@@ -557,9 +638,11 @@ public class ProviderEndToEndTest {
       assertEquals(transport.connectionHandleCount(), transport.settledConnectHandleCount());
       assertTrue(transport.allConnectHandlesSettled());
       assertEquals(-1L, scheduler.nextDelayMillis());
-      assertEquals(0, budgetInt("openConnections"));
-      assertEquals(0, budgetInt("heldFrames"));
-      assertEquals(0, budget.reservedSubscriptionSlots());
+      if (assertBudgetReleased) {
+        assertEquals(0, budgetInt("openConnections"));
+        assertEquals(0, budgetInt("heldFrames"));
+        assertEquals(0, budget.reservedSubscriptionSlots());
+      }
       int eventCount = trace.size();
       transport.lateCompleteMeta(200, metadata("BTC"));
       transport.lateOpenConnections();
@@ -695,6 +778,7 @@ public class ProviderEndToEndTest {
   private static final class RecordingData implements Layer1ApiDataAdapter {
     private final List<String> trace;
     private final List<String> depths = new ArrayList<String>();
+    private final List<String> trades = new ArrayList<String>();
 
     private RecordingData(List<String> trace) {
       this.trace = trace;
@@ -709,7 +793,9 @@ public class ProviderEndToEndTest {
 
     @Override
     public void onTrade(String alias, double price, int size, TradeInfo trade) {
-      trace.add("trade:" + alias);
+      String event = "trade:" + alias + ":" + (int) price;
+      trades.add(event);
+      trace.add(event);
     }
   }
 
