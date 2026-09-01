@@ -236,6 +236,13 @@ public final class SubscriptionRecord {
     return taken;
   }
 
+  /** Drops trades retained while recovering a generation without affecting pending activation. */
+  void clearRecoveryTrades() {
+    pendingTrades.clear();
+    pendingTradeKeys.clear();
+    pendingTradeOverflowWarned = false;
+  }
+
   /** Returns whether the queue-overflow warning was already emitted. */
   public boolean pendingTradeOverflowWarned() {
     return pendingTradeOverflowWarned;

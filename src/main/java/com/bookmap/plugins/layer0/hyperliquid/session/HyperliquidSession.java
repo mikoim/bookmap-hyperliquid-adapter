@@ -25,9 +25,12 @@ import com.bookmap.plugins.layer0.hyperliquid.trade.BoundedTradeDeduplicator;
 import com.bookmap.plugins.layer0.hyperliquid.transport.TransportFailure;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.TimeoutException;
 import java.util.function.LongSupplier;
 
 /**
@@ -38,6 +41,7 @@ public final class HyperliquidSession
     implements HyperliquidSessionApi, HyperliquidConnector.Listener {
 
   private static final long ACTIVATION_TIMEOUT_MILLIS = 10_000L;
+  private static final long ACK_TIMEOUT_MILLIS = 10_000L;
   private static final int TRADE_DEDUPLICATION_CAPACITY = 100_000;
   private static final long TRADE_DEDUPLICATION_TTL_MILLIS = 60_000L;
 
@@ -54,10 +58,22 @@ public final class HyperliquidSession
   private final Map<String, PerpetualInstrument> instruments =
       new TreeMap<String, PerpetualInstrument>();
   private final Map<String, SubscriptionRecord> records = new TreeMap<String, SubscriptionRecord>();
+  private final Map<SubscriptionKey, CancellableScheduler.Cancellable> acknowledgementTasks =
+      new TreeMap<SubscriptionKey, CancellableScheduler.Cancellable>();
+  private final Map<SubscriptionKey, Long> acknowledgementDeadlines =
+      new TreeMap<SubscriptionKey, Long>();
+  private final Set<SubscriptionKey> timedOutAcknowledgements = new HashSet<SubscriptionKey>();
 
   private boolean closed;
   private boolean metadataReceived;
   private boolean connectedOnce;
+  private boolean loginNotified;
+  private boolean loginFailureNotified;
+  private boolean lossNotifiedForIncident;
+  private boolean restoreNotifiedForIncident;
+  private boolean recovering;
+  private boolean generationInvalidated;
+  private ConnectionState connectionState = ConnectionState.STARTING;
   private long currentGeneration = -1L;
 
   /**
@@ -150,8 +166,23 @@ public final class HyperliquidSession
         new Runnable() {
           @Override
           public void run() {
-            if (!closed) {
-              sink.onDiagnostic("market-data frame queue overflow");
+            if (!closed && connectionState != ConnectionState.STOPPED) {
+              sink.onSystemMessage("market-data frame queue overflow", MessageKind.UNCLASSIFIED);
+              dispatcher.discardMarketFrames();
+              for (SubscriptionRecord record : records.values()) {
+                if (record.state() == SubscriptionRecord.State.ACTIVE) {
+                  record.requestFullResync();
+                }
+              }
+              boolean reconnect = connectionState == ConnectionState.CONNECTED;
+              generationInvalidated = reconnect;
+              if (reconnect) {
+                connectionState = ConnectionState.RECONNECTING;
+                recovering = true;
+                connector.reconnect(
+                    new TransportFailure(
+                        TransportFailure.Kind.REMOTE, "market-data frame queue overflow", null));
+              }
             }
           }
         });
@@ -174,25 +205,36 @@ public final class HyperliquidSession
   /** Receives initial connector failure on the serialized state lane. */
   @Override
   public void onInitialFailure(TransportFailure failure) {
-    if (!closed) {
+    if (!closed && !loginFailureNotified) {
+      loginFailureNotified = true;
       sink.onLoginFailed(loginFailure(failure), failure == null ? null : failure.message());
+      stop(StopCause.INITIAL_FAILURE);
     }
   }
 
   /** Receives a newly opened connector generation on the serialized state lane. */
   @Override
   public void onSocketOpened(long generation) {
-    if (closed) {
+    if (closed || connectionState == ConnectionState.STOPPED) {
       return;
     }
+    boolean reconnecting = connectedOnce;
     currentGeneration = generation;
+    generationInvalidated = false;
+    dispatcher.resetOverflowSignal();
     for (SubscriptionRecord record : records.values()) {
       record.beginGeneration(generation);
     }
-    if (connectedOnce) {
-      sink.onConnectionRestored();
+    if (reconnecting) {
+      connectionState = ConnectionState.RECONNECTING;
+      recovering = true;
+      if (records.isEmpty()) {
+        maybeRestore(generation);
+      }
     } else {
+      connectionState = ConnectionState.CONNECTED;
       connectedOnce = true;
+      loginNotified = true;
       sink.onLoginSuccessful();
     }
   }
@@ -206,7 +248,7 @@ public final class HyperliquidSession
           new Runnable() {
             @Override
             public void run() {
-              if (!closed) {
+              if (!closed && generation == currentGeneration && !generationInvalidated) {
                 sink.onDiagnostic(diagnostic);
               }
             }
@@ -244,12 +286,14 @@ public final class HyperliquidSession
           public void run() {
             if (closed
                 || generation != currentGeneration
+                || generationInvalidated
                 || message.kind() != OutboundMessage.Kind.SUBSCRIBE) {
               return;
             }
             SubscriptionRecord record = recordForKey(message.subscription());
             if (record != null && record.state() != SubscriptionRecord.State.REMOVED) {
               record.markSent(generation, message.subscription());
+              scheduleAcknowledgementTimeout(generation, message, sentAtMillis);
             }
           }
         });
@@ -260,13 +304,33 @@ public final class HyperliquidSession
   public void onDisconnected(long generation, TransportFailure failure) {
     if (!closed && generation == currentGeneration) {
       currentGeneration = -1L;
+      cancelAcknowledgementTasks();
       dispatcher.discardMarketFrames();
-      sink.onConnectionLost(connectionFailure(failure), failure == null ? null : failure.message());
+      for (SubscriptionRecord record : records.values()) {
+        if (record.state() == SubscriptionRecord.State.ACTIVE) {
+          record.requestFullResync();
+          record.clearRecoveryBook();
+          record.clearRecoveryTrades();
+        }
+      }
+      ConnectionFailure classified = connectionFailure(failure);
+      if (!lossNotifiedForIncident) {
+        lossNotifiedForIncident = true;
+        sink.onConnectionLost(classified, failure == null ? null : failure.message());
+      }
+      if (classified == ConnectionFailure.FATAL) {
+        stop(StopCause.FATAL);
+      } else {
+        connectionState = ConnectionState.RECONNECTING;
+        recovering = true;
+        restoreNotifiedForIncident = false;
+      }
     }
   }
 
   private void handleLogin(HyperliquidEnvironment environment) {
     if (!closed && environment != null) {
+      connectionState = ConnectionState.STARTING;
       connector.start(environment);
     }
   }
@@ -330,19 +394,11 @@ public final class HyperliquidSession
   }
 
   private void handleClose() {
-    if (closed) {
-      return;
-    }
-    closed = true;
-    for (String alias : new ArrayList<String>(records.keySet())) {
-      removeRecord(alias, RemovalCause.CLOSE, null);
-    }
-    connector.close();
-    afterClose.run();
+    stop(StopCause.CLOSE);
   }
 
   private void handleControls(long generation, List<ControlEvent> controls) {
-    if (closed || generation != currentGeneration) {
+    if (closed || generation != currentGeneration || generationInvalidated) {
       return;
     }
     for (ControlEvent event : controls) {
@@ -358,29 +414,56 @@ public final class HyperliquidSession
 
   private void handleAcknowledgement(long generation, SubscriptionKey key) {
     SubscriptionRecord record = recordForKey(key);
-    if (record == null || record.state() != SubscriptionRecord.State.PENDING_BOOK) {
+    if (record == null || record.state() == SubscriptionRecord.State.REMOVED) {
+      return;
+    }
+    if (record.state() == SubscriptionRecord.State.PENDING_BOOK
+        && clock.getAsLong() >= record.activationDeadlineMillis()) {
+      // The activation timer owns this earlier (or equal) deadline and will release the permit.
+      return;
+    }
+    if (timedOutAcknowledgements.contains(key)) {
+      return;
+    }
+    CancellableScheduler.Cancellable task = acknowledgementTasks.remove(key);
+    if (task != null) {
+      task.cancel();
+    }
+    Long deadline = acknowledgementDeadline(generation, key);
+    acknowledgementDeadlines.remove(key);
+    if (deadline != null && clock.getAsLong() >= deadline.longValue()) {
+      handleAcknowledgementTimeout(generation, key);
       return;
     }
     if (record.acceptAcknowledgement(generation, key)) {
-      activateIfReady(record);
+      if (record.state() == SubscriptionRecord.State.PENDING_BOOK) {
+        activateIfReady(record);
+      }
+      maybeRestore(generation);
     }
   }
 
   private void handleSubscriptionError(SubscriptionKey target) {
     SubscriptionRecord record = recordForKey(target);
     if (record == null) {
-      connector.stopFatal("untargetable Hyperliquid subscription error");
+      // Preserve the connector's historical fatal notification for callers that surface all
+      // unrecoverable protocol failures through the login channel as well.
+      if (!loginFailureNotified) {
+        loginFailureNotified = true;
+        sink.onLoginFailed(LoginFailure.FATAL, "untargetable Hyperliquid subscription error");
+      }
+      stop(StopCause.FATAL);
       return;
     }
     removeRecord(record.alias(), RemovalCause.REJECTION, "Hyperliquid rejected subscription");
   }
 
   private void handleMarketFrame(long generation, List<MarketDataEvent> events) {
-    if (closed || generation != currentGeneration) {
+    if (closed || generation != currentGeneration || generationInvalidated) {
       return;
     }
     for (MarketDataEvent event : events) {
-      if (closed || generation != currentGeneration) {
+      if (closed || generation != currentGeneration || generationInvalidated) {
         return;
       }
       if (event instanceof BookSnapshot) {
@@ -413,6 +496,10 @@ public final class HyperliquidSession
       activateIfReady(record);
       return;
     }
+    if (recovering && connectionState == ConnectionState.RECONNECTING) {
+      record.acceptRecoveryBook(currentGeneration, validation.snapshot());
+      return;
+    }
     publishDepth(record, record.diff().apply(validation.snapshot(), record.takeForceFullResync()));
     record.acceptActiveBook(validation.snapshot().time());
   }
@@ -438,6 +525,17 @@ public final class HyperliquidSession
       }
       return;
     }
+    if (recovering && connectionState == ConnectionState.RECONNECTING) {
+      if (tradeDeduplicator.contains(converted.key(), clock.getAsLong())
+          || record.containsPendingTradeKey(converted.key())) {
+        return;
+      }
+      if (!record.addPendingTrade(converted) && !record.pendingTradeOverflowWarned()) {
+        record.markPendingTradeOverflowWarned();
+        sink.onDiagnostic("recovery trade buffer full for " + record.alias());
+      }
+      return;
+    }
     publishIfNew(record, converted);
   }
 
@@ -459,6 +557,7 @@ public final class HyperliquidSession
         || !record.hasAcknowledgement(SubscriptionType.L2_BOOK)
         || !record.hasAcknowledgement(SubscriptionType.TRADES)
         || record.pendingBook() == null
+        || connectionState == ConnectionState.RECONNECTING
         || clock.getAsLong() >= record.activationDeadlineMillis()) {
       return;
     }
@@ -500,9 +599,15 @@ public final class HyperliquidSession
       return;
     }
     boolean wasActive = record.state() == SubscriptionRecord.State.ACTIVE;
-    if (wasActive && (cause == RemovalCause.UNSUPPORTED_PRICE || cause == RemovalCause.REJECTION)) {
+    if (wasActive
+        && (cause == RemovalCause.UNSUPPORTED_PRICE
+            || cause == RemovalCause.REJECTION
+            || cause == RemovalCause.FATAL
+            || cause == RemovalCause.CLOSE)) {
       publishDepth(record, record.diff().clear());
     }
+    cancelAcknowledgement(record.l2BookKey());
+    cancelAcknowledgement(record.tradesKey());
     record.remove();
     if (wasActive) {
       sink.onInstrumentRemoved(alias);
@@ -514,6 +619,174 @@ public final class HyperliquidSession
     if (message != null) {
       sink.onSystemMessage(message, MessageKind.UNCLASSIFIED);
     }
+    maybeRestore(currentGeneration);
+  }
+
+  private void scheduleAcknowledgementTimeout(
+      final long generation, final OutboundMessage message, long sentAtMillis) {
+    if (message.subscription() == null) {
+      return;
+    }
+    CancellableScheduler.Cancellable previous = acknowledgementTasks.remove(message.subscription());
+    if (previous != null) {
+      previous.cancel();
+    }
+    final long deadline = sentAtMillis + ACK_TIMEOUT_MILLIS;
+    acknowledgementDeadlines.put(message.subscription(), Long.valueOf(deadline));
+    acknowledgementTasks.put(
+        message.subscription(),
+        scheduler.schedule(
+            new Runnable() {
+              @Override
+              public void run() {
+                dispatcher.submitControl(
+                    new Runnable() {
+                      @Override
+                      public void run() {
+                        if (!closed && generation == currentGeneration) {
+                          handleAcknowledgementTimeout(generation, message.subscription());
+                        }
+                      }
+                    });
+              }
+            },
+            Math.max(0L, deadline - clock.getAsLong())));
+  }
+
+  private Long acknowledgementDeadline(long generation, SubscriptionKey key) {
+    return acknowledgementDeadlines.containsKey(key) && generation == currentGeneration
+        ? acknowledgementDeadlines.get(key)
+        : null;
+  }
+
+  private void handleAcknowledgementTimeout(long generation, SubscriptionKey key) {
+    SubscriptionRecord record = recordForKey(key);
+    if (record == null
+        || generation != currentGeneration
+        || record.hasAcknowledgement(key.type())) {
+      acknowledgementTasks.remove(key);
+      acknowledgementDeadlines.remove(key);
+      return;
+    }
+    if (record.state() == SubscriptionRecord.State.PENDING_BOOK) {
+      if (clock.getAsLong() > record.activationDeadlineMillis()) {
+        removeRecord(record.alias(), RemovalCause.TIMEOUT, "subscription activation timed out");
+      }
+    } else if (record.state() == SubscriptionRecord.State.ACTIVE) {
+      acknowledgementTasks.remove(key);
+      acknowledgementDeadlines.remove(key);
+      timedOutAcknowledgements.add(key);
+      connector.reconnect(
+          new TransportFailure(
+              TransportFailure.Kind.NETWORK,
+              "Hyperliquid subscription acknowledgement timed out",
+              new TimeoutException("subscription acknowledgement timed out")));
+    }
+  }
+
+  private void cancelAcknowledgementTasks() {
+    for (CancellableScheduler.Cancellable task : acknowledgementTasks.values()) {
+      task.cancel();
+    }
+    acknowledgementTasks.clear();
+    acknowledgementDeadlines.clear();
+    timedOutAcknowledgements.clear();
+  }
+
+  private void cancelAcknowledgement(SubscriptionKey key) {
+    CancellableScheduler.Cancellable task = acknowledgementTasks.remove(key);
+    if (task != null) {
+      task.cancel();
+    }
+    acknowledgementDeadlines.remove(key);
+    timedOutAcknowledgements.remove(key);
+  }
+
+  private boolean allDesiredSubscriptionsAcked(long generation) {
+    for (SubscriptionRecord record : records.values()) {
+      if (record.state() == SubscriptionRecord.State.REMOVED
+          || !record.hasAcknowledgement(SubscriptionType.L2_BOOK)
+          || !record.hasAcknowledgement(SubscriptionType.TRADES)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private void maybeRestore(long generation) {
+    if (connectionState != ConnectionState.RECONNECTING
+        || generation != currentGeneration
+        || !allDesiredSubscriptionsAcked(generation)) {
+      return;
+    }
+    connectionState = ConnectionState.CONNECTED;
+    recovering = false;
+    connector.markHealthy(generation);
+    if (!restoreNotifiedForIncident) {
+      restoreNotifiedForIncident = true;
+      sink.onConnectionRestored();
+    }
+    lossNotifiedForIncident = false;
+    for (SubscriptionRecord record : records.values()) {
+      if (record.state() == SubscriptionRecord.State.ACTIVE) {
+        com.bookmap.plugins.layer0.hyperliquid.book.OrderBookSnapshotDiff.NormalizedBookSnapshot
+            book = record.takeRecoveryBook(generation);
+        if (book != null) {
+          publishDepth(record, record.diff().apply(book, true));
+          record.acceptActiveBook(book.time());
+          record.takeForceFullResync();
+        }
+        ArrayDeque<PendingTrade> pending = record.takePendingTrades();
+        while (!pending.isEmpty()) {
+          publishIfNew(record, pending.removeFirst());
+        }
+      } else if (record.state() == SubscriptionRecord.State.PENDING_BOOK) {
+        activateIfReady(record);
+      }
+    }
+  }
+
+  private enum ConnectionState {
+    STARTING,
+    CONNECTED,
+    RECONNECTING,
+    STOPPED
+  }
+
+  private enum StopCause {
+    INITIAL_FAILURE,
+    FATAL,
+    CLOSE
+  }
+
+  private void stop(StopCause cause) {
+    if (connectionState == ConnectionState.STOPPED) {
+      return;
+    }
+    connectionState = ConnectionState.STOPPED;
+    closed = true;
+    currentGeneration++;
+    generationInvalidated = true;
+    recovering = false;
+    cancelAcknowledgementTasks();
+    dispatcher.discardMarketFrames();
+    if (cause == StopCause.FATAL && loginNotified && !lossNotifiedForIncident) {
+      lossNotifiedForIncident = true;
+      sink.onConnectionLost(ConnectionFailure.FATAL, "Hyperliquid session stopped fatally");
+    }
+    connector.close();
+    for (String alias : new ArrayList<String>(records.keySet())) {
+      removeRecord(alias, cause == StopCause.FATAL ? RemovalCause.FATAL : RemovalCause.CLOSE, null);
+    }
+    tradeDeduplicator.clear();
+    dispatcher.submitControl(
+        new Runnable() {
+          @Override
+          public void run() {
+            dispatcher.close();
+            afterClose.run();
+          }
+        });
   }
 
   private LoginFailure loginFailure(TransportFailure failure) {
@@ -539,6 +812,7 @@ public final class HyperliquidSession
     TIMEOUT,
     REJECTION,
     UNSUPPORTED_PRICE,
+    FATAL,
     CLOSE
   }
 }
