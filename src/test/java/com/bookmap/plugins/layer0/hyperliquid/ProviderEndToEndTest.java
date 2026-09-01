@@ -73,6 +73,43 @@ public class ProviderEndToEndTest {
   }
 
   @Test
+  public void tradeDeduplicationUsesTenMinuteTtlAndTenThousandEntryCapacity() {
+    Fixture fixture = new Fixture(budget(2, 20, 20, 2));
+    fixture.login(HyperliquidEnvironment.MAINNET);
+    fixture.subscribe("BTC");
+    fixture.completeSends();
+    fixture.ack("BTC", "l2Book");
+    fixture.ack("BTC", "trades");
+    fixture.book("BTC", 1L, "100", "1", "101", "2");
+    fixture.drain();
+
+    fixture.trade("BTC", "B", "100", "1", 2L, 7L);
+    fixture.drain();
+    assertEquals(1, fixture.data.trades.size());
+
+    fixture.clock.now = 60_000L;
+    fixture.trade("BTC", "B", "100", "1", 2L, 7L);
+    fixture.drain();
+    assertEquals(1, fixture.data.trades.size());
+
+    for (int index = 0; index < 10_000; index++) {
+      fixture.trade("BTC", "B", "100", "1", 60_000L, index + 100L);
+      if (index % 1_000 == 999) {
+        fixture.drain();
+      }
+    }
+    fixture.drain();
+    assertEquals(10_001, fixture.data.trades.size());
+
+    fixture.trade("BTC", "B", "100", "1", 2L, 7L);
+    fixture.drain();
+    assertEquals(10_002, fixture.data.trades.size());
+
+    fixture.closeTwice();
+    fixture.assertClosed();
+  }
+
+  @Test
   public void testnetLoginSelectsBothTestnetEndpointsAndActivates() {
     Fixture fixture = new Fixture(budget(2, 10, 20, 2));
     fixture.login(HyperliquidEnvironment.TESTNET);

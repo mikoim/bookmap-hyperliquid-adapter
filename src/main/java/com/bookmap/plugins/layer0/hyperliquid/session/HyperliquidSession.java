@@ -42,8 +42,8 @@ public final class HyperliquidSession
 
   private static final long ACTIVATION_TIMEOUT_MILLIS = 10_000L;
   private static final long ACK_TIMEOUT_MILLIS = 10_000L;
-  private static final int TRADE_DEDUPLICATION_CAPACITY = 100_000;
-  private static final long TRADE_DEDUPLICATION_TTL_MILLIS = 60_000L;
+  private static final int TRADE_DEDUPLICATION_CAPACITY = 10_000;
+  private static final long TRADE_DEDUPLICATION_TTL_MILLIS = 600_000L;
 
   private final HyperliquidConnector connector;
   private final HyperliquidMessageParser parser;
