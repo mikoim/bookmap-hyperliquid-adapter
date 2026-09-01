@@ -141,10 +141,35 @@ public class HyperliquidMessageParserTest {
   }
 
   @Test
+  public void acceptsServerNormalizedL2BookSubscriptionAck() {
+    ParsedFrame frame =
+        parser.parse(
+            "{\"channel\":\"subscriptionResponse\",\"data\":{"
+                + "\"method\":\"subscribe\",\"subscription\":{\"type\":\"l2Book\","
+                + "\"coin\":\"BTC\",\"nSigFigs\":null,\"mantissa\":null,\"fast\":false}}}");
+
+    assertEquals(ParsedFrame.Disposition.ACCEPTED, frame.disposition());
+    assertEquals(ControlEvent.Kind.SUBSCRIPTION_ACK, frame.controlEvents().get(0).kind());
+    assertEquals(
+        new SubscriptionKey("BTC", SubscriptionType.L2_BOOK),
+        frame.controlEvents().get(0).target());
+  }
+
+  @Test
+  public void ignoresSuccessfulUnsubscribeResponse() {
+    ParsedFrame frame =
+        parser.parse(
+            "{\"channel\":\"subscriptionResponse\",\"data\":{\"method\":\"unsubscribe\","
+                + "\"subscription\":{\"type\":\"l2Book\",\"coin\":\"BTC\","
+                + "\"nSigFigs\":null,\"mantissa\":null,\"fast\":false}}}");
+
+    assertEquals(ParsedFrame.Disposition.IGNORED, frame.disposition());
+    assertTrue(frame.controlEvents().isEmpty());
+    assertTrue(frame.diagnostics().isEmpty());
+  }
+
+  @Test
   public void rejectsAckThatCannotMatchSentSubscriptionKey() {
-    assertInvalid(
-        "{\"channel\":\"subscriptionResponse\",\"data\":{\"method\":\"unsubscribe\","
-            + "\"subscription\":{\"type\":\"l2Book\",\"coin\":\"BTC\"}}}");
     assertInvalid(
         "{\"channel\":\"subscriptionResponse\",\"data\":{\"method\":\"subscribe\","
             + "\"subscription\":{\"type\":\"unknown\",\"coin\":\"BTC\"}}}");

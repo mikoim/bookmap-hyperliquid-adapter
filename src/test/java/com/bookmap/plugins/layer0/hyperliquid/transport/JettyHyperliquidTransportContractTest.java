@@ -2,6 +2,7 @@ package com.bookmap.plugins.layer0.hyperliquid.transport;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import java.lang.reflect.InvocationHandler;
@@ -10,10 +11,47 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.eclipse.jetty.websocket.api.RemoteEndpoint;
 import org.eclipse.jetty.websocket.api.Session;
 import org.eclipse.jetty.websocket.api.WriteCallback;
+import org.eclipse.jetty.websocket.common.events.annotated.CallableMethod;
 import org.junit.Test;
 
 /** Pins the Jetty 9.3 remote-endpoint boundary without an external WebSocket server. */
 public class JettyHyperliquidTransportContractTest {
+
+  @Test
+  public void jettyCanReflectivelyInvokeAnnotatedEndpoint() throws Exception {
+    final AtomicReference<Throwable> delivered = new AtomicReference<Throwable>();
+    SocketAdapter adapter =
+        new SocketAdapter(
+            new HyperliquidTransport.SocketCallback() {
+              @Override
+              public void onOpen(HyperliquidTransport.Socket socket) {
+                // Not exercised by this reflection boundary test.
+              }
+
+              @Override
+              public void onText(String text) {
+                // Not exercised by this reflection boundary test.
+              }
+
+              @Override
+              public void onClose(int code, String reason) {
+                // Not exercised by this reflection boundary test.
+              }
+
+              @Override
+              public void onFailure(Throwable failure) {
+                delivered.set(failure);
+              }
+            });
+    IllegalStateException failure = new IllegalStateException("socket failure");
+    CallableMethod callable =
+        new CallableMethod(
+            SocketAdapter.class, SocketAdapter.class.getMethod("onError", Throwable.class));
+
+    callable.call(adapter, failure);
+
+    assertSame(failure, delivered.get());
+  }
 
   @Test
   public void socketDelegatesExactBodyAndWriteCallbacksOnce() {

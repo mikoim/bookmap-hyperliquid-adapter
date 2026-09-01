@@ -6,7 +6,6 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.api.Request;
 import org.eclipse.jetty.client.api.Result;
@@ -18,11 +17,6 @@ import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.websocket.api.RemoteEndpoint;
 import org.eclipse.jetty.websocket.api.Session;
 import org.eclipse.jetty.websocket.api.WriteCallback;
-import org.eclipse.jetty.websocket.api.annotations.OnWebSocketClose;
-import org.eclipse.jetty.websocket.api.annotations.OnWebSocketConnect;
-import org.eclipse.jetty.websocket.api.annotations.OnWebSocketError;
-import org.eclipse.jetty.websocket.api.annotations.OnWebSocketMessage;
-import org.eclipse.jetty.websocket.api.annotations.WebSocket;
 import org.eclipse.jetty.websocket.client.WebSocketClient;
 
 /** Jetty 9.3 implementation of the asynchronous Hyperliquid transport boundary. */
@@ -163,45 +157,5 @@ final class JettySocket implements HyperliquidTransport.Socket {
   @Override
   public boolean isOpen() {
     return session.isOpen();
-  }
-}
-
-/** Forwards Jetty annotated socket events to the connector transport callback. */
-@WebSocket(maxTextMessageSize = Integer.MAX_VALUE)
-final class SocketAdapter {
-
-  private final HyperliquidTransport.SocketCallback callback;
-  private final AtomicReference<Session> session = new AtomicReference<Session>();
-
-  SocketAdapter(HyperliquidTransport.SocketCallback callback) {
-    this.callback = callback;
-  }
-
-  @OnWebSocketConnect
-  public void onConnect(Session connectedSession) {
-    session.set(connectedSession);
-    callback.onOpen(new JettySocket(connectedSession));
-  }
-
-  @OnWebSocketMessage
-  public void onMessage(String text) {
-    callback.onText(text);
-  }
-
-  @OnWebSocketClose
-  public void onClose(int code, String reason) {
-    callback.onClose(code, reason);
-  }
-
-  @OnWebSocketError
-  public void onError(Throwable failure) {
-    callback.onFailure(failure);
-  }
-
-  void closeSession() {
-    Session opened = session.get();
-    if (opened != null && opened.isOpen()) {
-      opened.close();
-    }
   }
 }

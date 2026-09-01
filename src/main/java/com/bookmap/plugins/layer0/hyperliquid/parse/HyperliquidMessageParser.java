@@ -16,6 +16,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /** Parses Hyperliquid WebSocket messages into market-data and control-frame results. */
 public final class HyperliquidMessageParser {
@@ -142,16 +143,19 @@ public final class HyperliquidMessageParser {
       throw new ProtocolException("subscription response data must be an object");
     }
     JsonObject response = data.getAsJsonObject();
-    if (!"subscribe".equals(requiredString(response, "method"))) {
-      throw new ProtocolException("subscription response method must be subscribe");
-    }
+    String method = requiredString(response, "method");
     JsonElement subscription = response.get("subscription");
     if (subscription == null || !subscription.isJsonObject()) {
       throw new ProtocolException("subscription response must contain a subscription object");
     }
-    ControlEvent event =
-        new ControlEvent(
-            ControlEvent.Kind.SUBSCRIPTION_ACK, parseSubscription(subscription.getAsJsonObject()));
+    SubscriptionKey key = parseSubscription(subscription.getAsJsonObject());
+    if ("unsubscribe".equals(method)) {
+      return ParsedFrame.ignored(Collections.<String>emptyList());
+    }
+    if (!"subscribe".equals(method)) {
+      throw new ProtocolException("unsupported subscription response method");
+    }
+    ControlEvent event = new ControlEvent(ControlEvent.Kind.SUBSCRIPTION_ACK, key);
     return ParsedFrame.accepted(
         Collections.<MarketDataEvent>emptyList(),
         Collections.singletonList(event),
@@ -190,19 +194,30 @@ public final class HyperliquidMessageParser {
   }
 
   private SubscriptionKey parseSubscription(JsonObject subscription) throws ProtocolException {
-    if (subscription.entrySet().size() != 2
-        || !subscription.has("type")
-        || !subscription.has("coin")) {
-      throw new ProtocolException("subscription must contain exactly type and coin");
+    if (!subscription.has("type") || !subscription.has("coin")) {
+      throw new ProtocolException("subscription must contain type and coin");
     }
     String type = requiredString(subscription, "type");
     String coin = requiredNonBlankString(subscription, "coin");
+    for (Map.Entry<String, JsonElement> field : subscription.entrySet()) {
+      if (!isAllowedSubscriptionField(type, field.getKey())) {
+        throw new ProtocolException("subscription contains an unsupported field");
+      }
+    }
     for (SubscriptionType candidate : SubscriptionType.values()) {
       if (candidate.wireName().equals(type)) {
         return new SubscriptionKey(coin, candidate);
       }
     }
     throw new ProtocolException("unsupported subscription type");
+  }
+
+  private boolean isAllowedSubscriptionField(String type, String field) {
+    if ("type".equals(field) || "coin".equals(field)) {
+      return true;
+    }
+    return "l2Book".equals(type)
+        && ("nSigFigs".equals(field) || "mantissa".equals(field) || "fast".equals(field));
   }
 
   private String requiredString(JsonObject object, String field) throws ProtocolException {
