@@ -22,6 +22,10 @@ final class RecordingSessionSink implements SessionSink {
     return addedAliases;
   }
 
+  List<String> removedAliases() {
+    return removedAliases;
+  }
+
   List<Trade> trades() {
     return trades;
   }

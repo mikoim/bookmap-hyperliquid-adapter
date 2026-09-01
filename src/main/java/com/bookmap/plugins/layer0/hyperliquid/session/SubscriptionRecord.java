@@ -42,6 +42,8 @@ public final class SubscriptionRecord {
   private long subscriptionGeneration = -1L;
   private long lastAcceptedBookTime = -1L;
   private NormalizedBookSnapshot pendingBook;
+  private long recoveryGeneration = -1L;
+  private NormalizedBookSnapshot recoveryBook;
   private boolean pendingTradeOverflowWarned;
   private boolean forceFullResync;
 
@@ -116,6 +118,54 @@ public final class SubscriptionRecord {
     lastAcceptedBookTime = time;
   }
 
+  /** Returns the latest timestamp-valid book candidate captured during recovery. */
+  public NormalizedBookSnapshot recoveryBook() {
+    return recoveryBook;
+  }
+
+  /** Returns the recovery candidate timestamp, or {@code -1} when none is retained. */
+  public long recoveryBookTime() {
+    return recoveryBook == null ? -1L : recoveryBook.time();
+  }
+
+  /**
+   * Retains a recovery candidate without changing the live diff baseline or accepted-book time.
+   *
+   * @return whether the candidate belongs to this active generation and is newer than both retained
+   *     timestamps
+   */
+  public boolean acceptRecoveryBook(long generation, NormalizedBookSnapshot book) {
+    if (state != State.ACTIVE
+        || book == null
+        || subscriptionGeneration != generation
+        || book.time() < lastAcceptedBookTime
+        || (recoveryBook != null && book.time() < recoveryBook.time())) {
+      return false;
+    }
+    if (recoveryGeneration != generation) {
+      clearRecoveryBook();
+      recoveryGeneration = generation;
+    }
+    recoveryBook = book;
+    return true;
+  }
+
+  /** Removes the retained recovery candidate and its generation marker. */
+  public void clearRecoveryBook() {
+    recoveryBook = null;
+    recoveryGeneration = -1L;
+  }
+
+  /** Takes the candidate for a matching generation, clearing it from this record. */
+  public NormalizedBookSnapshot takeRecoveryBook(long generation) {
+    if (recoveryGeneration != generation) {
+      return null;
+    }
+    NormalizedBookSnapshot candidate = recoveryBook;
+    clearRecoveryBook();
+    return candidate;
+  }
+
   /** Removes and returns the pending activation candidate. */
   public NormalizedBookSnapshot takePendingBook() {
     NormalizedBookSnapshot candidate = pendingBook;
@@ -160,6 +210,7 @@ public final class SubscriptionRecord {
     subscriptionGeneration = generation;
     sent.clear();
     acknowledgements.clear();
+    clearRecoveryBook();
   }
 
   /** Stores a converted pending trade when its bounded queue has room. */
@@ -225,6 +276,7 @@ public final class SubscriptionRecord {
     sent.clear();
     acknowledgements.clear();
     pendingBook = null;
+    clearRecoveryBook();
     pendingTrades.clear();
     pendingTradeKeys.clear();
     lastAcceptedBookTime = -1L;
