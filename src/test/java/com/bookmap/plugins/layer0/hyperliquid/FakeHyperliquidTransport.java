@@ -20,6 +20,7 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
   private final FakeSocket socket = new FakeSocket();
   private boolean httpCancelled;
   private boolean connectCancelled;
+  private boolean closed;
 
   @Override
   public void start() {
@@ -58,7 +59,8 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
 
   @Override
   public void close() {
-    // The fake owns no resources.
+    closed = true;
+    socket.close(1000, "transport closed");
   }
 
   public URI httpUri() {
@@ -95,6 +97,10 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
 
   public boolean connectCancelled() {
     return connectCancelled;
+  }
+
+  public boolean closed() {
+    return closed;
   }
 
   public void emitTextFromConnection(int connectionIndex, String text) {
@@ -153,6 +159,7 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
       closeCode = code;
       closeReason = reason;
       open = false;
+      pending.clear();
     }
 
     @Override

@@ -1,6 +1,7 @@
 package com.bookmap.plugins.layer0.hyperliquid;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget;
@@ -51,7 +52,9 @@ public class ProviderEndToEndTest {
     fixture.drain();
 
     assertEquals(
-        Arrays.asList("login", "added:BTC", "depth:BTC", "depth:BTC", "trade:BTC"), fixture.trace);
+        Arrays.asList(
+            "login", "added:BTC", "depth:BTC:1000000:100", "depth:BTC:1010000:200", "trade:BTC"),
+        fixture.trace);
     assertEquals("https://api.hyperliquid.xyz/info", fixture.transport.httpUri().toString());
     assertEquals(
         "wss://api.hyperliquid.xyz/ws", fixture.transport.connectCalls().get(0).toString());
@@ -112,6 +115,8 @@ public class ProviderEndToEndTest {
     assertTrue(fixture.data.depths.size() > depthsBeforeLoss);
     assertEquals("depth:BTC:1000000:0", fixture.data.depths.get(depthsBeforeLoss));
     assertEquals("depth:BTC:1000000:100", fixture.data.depths.get(depthsBeforeLoss + 1));
+    assertEquals("depth:BTC:1010000:0", fixture.data.depths.get(depthsBeforeLoss + 2));
+    assertEquals("depth:BTC:1010000:200", fixture.data.depths.get(depthsBeforeLoss + 3));
     fixture.closeTwice();
     fixture.assertClosed();
   }
@@ -185,6 +190,19 @@ public class ProviderEndToEndTest {
     assertEquals(depthsBeforeInvalid, fixture.data.depths.size());
     assertEquals(1, fixture.transport.connectCalls().size());
     assertEquals(1_000L, fixture.scheduler.nextDelayMillis());
+    assertEquals(1, fixture.admin.connectionLostCount);
+    fixture.advance(1_000L);
+    fixture.transport.openSocket();
+    fixture.drain();
+    fixture.completeSends();
+    fixture.ack("BTC", "l2Book");
+    fixture.ack("BTC", "trades");
+    fixture.book("BTC", 10_001L, "100", "1", "101", "2");
+    fixture.drain();
+    assertEquals(2, fixture.transport.connectCalls().size());
+    assertEquals(1, fixture.admin.connectionRestoredCount);
+    assertEquals("depth:BTC:1000000:0", fixture.data.depths.get(depthsBeforeInvalid));
+    assertEquals("depth:BTC:1000000:100", fixture.data.depths.get(depthsBeforeInvalid + 1));
     fixture.closeTwice();
     fixture.assertClosed();
   }
@@ -207,6 +225,11 @@ public class ProviderEndToEndTest {
     fixture.drain();
     assertEquals(Collections.singletonList("BTC"), fixture.instruments.removed);
     assertTrue(fixture.instruments.added.contains("ETH"));
+    fixture.book("ETH", 2L, "200", "2", "201", "3");
+    fixture.trade("ETH", "A", "201", "1", 3L, 8L);
+    fixture.drain();
+    assertTrue(fixture.data.depths.contains("depth:ETH:2000000:200"));
+    assertTrue(fixture.trace.contains("trade:ETH"));
 
     fixture.error(null);
     fixture.drain();
@@ -220,7 +243,7 @@ public class ProviderEndToEndTest {
 
   @Test
   public void sharedBudgetCapsConnectionsSubscriptionsAndFramesWithoutBlockingStateLanes() {
-    HyperliquidProcessBudget budget = budget(1, 1, 2, 2);
+    HyperliquidProcessBudget budget = budget(2, 20, 2, 4);
     Fixture first = new Fixture(budget);
     Fixture second = new Fixture(budget);
     first.login(HyperliquidEnvironment.MAINNET);
@@ -235,16 +258,43 @@ public class ProviderEndToEndTest {
     second.drain();
     second.transport.completeMeta(200, metadata("BTC"));
     second.drain();
+    second.transport.openSocket();
+    second.drain();
     second.subscribe("BTC");
     second.drain();
     assertEquals(1, first.transport.connectCalls().size());
-    assertEquals(0, second.transport.connectCalls().size());
-    assertEquals(2, budget.reservedSubscriptionSlots());
+    assertEquals(1, second.transport.connectCalls().size());
+    assertEquals(4, budget.reservedSubscriptionSlots());
+    assertEquals(0, second.transport.socket().pendingSendCount());
     assertEquals(0, second.executor.queuedTaskCount());
 
     first.closeTwice();
     second.closeTwice();
     first.assertClosed();
+    second.assertClosed();
+  }
+
+  @Test
+  public void sharedBudgetConnectionAndAttemptLimitsRetryWithoutBlocking() {
+    HyperliquidProcessBudget budget = budget(1, 1, 4, 2);
+    Fixture first = new Fixture(budget);
+    Fixture second = new Fixture(budget);
+    first.login(HyperliquidEnvironment.MAINNET);
+    second.provider.login(Fixture.mainnetLogin());
+    second.drain();
+    second.transport.completeMeta(200, metadata("BTC"));
+    second.drain();
+
+    assertEquals(1, first.transport.connectCalls().size());
+    assertEquals(0, second.transport.connectCalls().size());
+    assertEquals(10L, second.scheduler.nextDelayMillis());
+
+    first.closeTwice();
+    first.assertClosed();
+    second.advance(10L);
+    assertEquals(0, second.transport.connectCalls().size());
+    assertEquals(59_990L, second.scheduler.nextDelayMillis());
+    second.closeTwice();
     second.assertClosed();
   }
 
@@ -437,15 +487,17 @@ public class ProviderEndToEndTest {
 
     private void assertClosed() {
       assertTrue(executor.shutdownRequested);
-      assertTrue(
-          transport.httpCancelled()
-              || transport.connectCancelled()
-              || !transport.socket().isOpen());
+      assertTrue(transport.closed());
+      assertFalse(transport.socket().isOpen());
+      assertEquals(0, transport.socket().pendingSendCount());
       assertEquals(-1L, scheduler.nextDelayMillis());
       assertEquals(0, budget.reservedSubscriptionSlots());
       int eventCount = trace.size();
       if (!transport.connectCalls().isEmpty()) {
-        transport.emitTextFromConnection(0, "{\"channel\":\"trades\",\"data\":[]}");
+        transport.emitTextFromConnection(0, bookJson("BTC", 99_999L, "333", "1", "334", "1"));
+        transport.emitTextFromConnection(
+            0,
+            "{\"channel\":\"trades\",\"data\":[{\"coin\":\"BTC\",\"side\":\"B\",\"px\":\"333\",\"sz\":\"1\",\"time\":99999,\"tid\":99999}]}");
         drain();
       }
       assertEquals(eventCount, trace.size());
