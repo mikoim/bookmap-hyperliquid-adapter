@@ -419,7 +419,12 @@ public class HyperliquidSessionSubscriptionTest {
     fixture.login();
     fixture.receive(error(null));
     fixture.drain();
-    assertTrue(fixture.sink.events().contains("login-failed:FATAL"));
+    assertFalse(fixture.sink.events().contains("login-failed:FATAL"));
+    assertEquals(1, countContaining(fixture.sink.events(), "connection-lost:FATAL"));
+    int eventCount = fixture.sink.events().size();
+    fixture.receive(error(null));
+    fixture.drain();
+    assertEquals(eventCount, fixture.sink.events().size());
   }
 
   @Test

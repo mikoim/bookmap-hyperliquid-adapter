@@ -172,9 +172,13 @@ public final class HyperliquidSession
               for (SubscriptionRecord record : records.values()) {
                 if (record.state() == SubscriptionRecord.State.ACTIVE) {
                   record.requestFullResync();
+                  record.clearRecoveryBook();
+                  record.clearRecoveryTrades();
                 }
               }
-              boolean reconnect = connectionState == ConnectionState.CONNECTED;
+              boolean reconnect =
+                  connectionState == ConnectionState.CONNECTED
+                      || connectionState == ConnectionState.RECONNECTING;
               generationInvalidated = reconnect;
               if (reconnect) {
                 connectionState = ConnectionState.RECONNECTING;
@@ -446,12 +450,6 @@ public final class HyperliquidSession
   private void handleSubscriptionError(SubscriptionKey target) {
     SubscriptionRecord record = recordForKey(target);
     if (record == null) {
-      // Preserve the connector's historical fatal notification for callers that surface all
-      // unrecoverable protocol failures through the login channel as well.
-      if (!loginFailureNotified) {
-        loginFailureNotified = true;
-        sink.onLoginFailed(LoginFailure.FATAL, "untargetable Hyperliquid subscription error");
-      }
       stop(StopCause.FATAL);
       return;
     }
