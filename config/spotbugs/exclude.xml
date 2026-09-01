@@ -17,4 +17,12 @@
     <Class name="com.bookmap.plugins.layer0.hyperliquid.transport.JettySocket"/>
     <Bug pattern="SIC_INNER_SHOULD_BE_STATIC_ANON"/>
   </Match>
+  <Match>
+    <Class name="com.bookmap.plugins.layer0.hyperliquid.session.HyperliquidSession"/>
+    <Bug pattern="EI_EXPOSE_REP2"/>
+  </Match>
+  <Match>
+    <Class name="com.bookmap.plugins.layer0.hyperliquid.session.SubscriptionRecord"/>
+    <Bug pattern="EI_EXPOSE_REP"/>
+  </Match>
 </FindBugsFilter>

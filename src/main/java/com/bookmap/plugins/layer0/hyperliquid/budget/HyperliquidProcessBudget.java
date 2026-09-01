@@ -109,6 +109,13 @@ public final class HyperliquidProcessBudget {
     }
   }
 
+  /** Returns the number of currently reserved provider subscription slots. */
+  public int reservedSubscriptionSlots() {
+    synchronized (lock) {
+      return reservedSubscriptions;
+    }
+  }
+
   private long earliestRetryForConnection(long nowMillis, int reservedFrames) {
     synchronized (lock) {
       if (reservedFrames > maxFrames) {
