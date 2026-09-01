@@ -409,13 +409,14 @@ public class ProviderEndToEndTest {
     }
 
     private void ack(String coin, String type) {
-      transport.emitTextFromConnection(
-          transport.connectCalls().size() - 1,
-          "{\"channel\":\"subscriptionResponse\",\"data\":{\"method\":\"subscribe\",\"subscription\":{\"type\":\""
+      String response =
+          "{\"channel\":\"subscriptionResponse\",\"data\":{\"method\":\"subscribe\","
+              + "\"subscription\":{\"type\":\""
               + type
               + "\",\"coin\":\""
               + coin
-              + "\"}}}");
+              + "\"}}}";
+      transport.emitTextFromConnection(transport.connectCalls().size() - 1, response);
       drain();
     }
 
@@ -495,9 +496,10 @@ public class ProviderEndToEndTest {
       int eventCount = trace.size();
       if (!transport.connectCalls().isEmpty()) {
         transport.emitTextFromConnection(0, bookJson("BTC", 99_999L, "333", "1", "334", "1"));
-        transport.emitTextFromConnection(
-            0,
-            "{\"channel\":\"trades\",\"data\":[{\"coin\":\"BTC\",\"side\":\"B\",\"px\":\"333\",\"sz\":\"1\",\"time\":99999,\"tid\":99999}]}");
+        String lateTrade =
+            "{\"channel\":\"trades\",\"data\":[{\"coin\":\"BTC\",\"side\":\"B\","
+                + "\"px\":\"333\",\"sz\":\"1\",\"time\":99999,\"tid\":99999}]}";
+        transport.emitTextFromConnection(0, lateTrade);
         drain();
       }
       assertEquals(eventCount, trace.size());
@@ -635,5 +637,10 @@ public class ProviderEndToEndTest {
     }
   }
 
-  private static final class EmptyOrder implements OrderSendParameters {}
+  private static final class EmptyOrder implements OrderSendParameters {
+    @Override
+    public String toString() {
+      return "empty";
+    }
+  }
 }
