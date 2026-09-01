@@ -7,11 +7,9 @@ import static org.junit.Assert.assertTrue;
 import com.bookmap.plugins.layer0.hyperliquid.FakeHyperliquidTransport;
 import com.bookmap.plugins.layer0.hyperliquid.HyperliquidConnector;
 import com.bookmap.plugins.layer0.hyperliquid.HyperliquidEnvironment;
-import com.bookmap.plugins.layer0.hyperliquid.OutboundMessage;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.CancellableScheduler;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.StateEventDispatcher;
-import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionKey;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionType;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMessageParser;
 import com.bookmap.plugins.layer0.hyperliquid.transport.TransportFailure;
@@ -417,23 +415,38 @@ public class HyperliquidSessionLifecycleTest {
   }
 
   @Test
-  public void staleGenerationSendsTimersFramesAndSocketCallbacksAreIgnored() {
+  public void staleGenerationPendingSendTimerAndSocketCallbackLeaveReplacementUntouched() {
     Fixture fixture = fixtureWithActiveBtc();
     fixture.beginRecovery();
-    fixture.session.onFrameSent(
-        1L,
-        new OutboundMessage(
-            OutboundMessage.Kind.SUBSCRIBE,
-            new SubscriptionKey("BTC", SubscriptionType.L2_BOOK),
-            "{}"),
-        0L);
-    fixture.session.onFrame(1L, "{\"channel\":\"pong\"}");
-    fixture.session.onDisconnected(
-        1L, new TransportFailure(TransportFailure.Kind.NETWORK, "stale", null));
+    fixture.transport.socket().succeedNextSend();
+    fixture.drain();
+    Runnable oldGenerationAcknowledgement =
+        fixture.scheduler.takeTaskAt(fixture.clock.now + 10_000L);
+    assertTrue(oldGenerationAcknowledgement != null);
+    assertEquals(1, fixture.transport.socket().pendingSendCount());
+
+    fixture.transport.remoteClose(1006, "replace generation");
+    fixture.drain();
+    fixture.scheduler.advanceBy(2_000L);
+    fixture.drain();
+    fixture.transport.openSocket();
+    fixture.generation = 3L;
     fixture.drain();
 
-    assertEquals(1, count(fixture.sink.events(), "connection-lost:UNKNOWN"));
-    assertEquals(0, count(fixture.sink.events(), "connection-restored"));
+    int eventsBeforeStaleCallbacks = fixture.sink.events().size();
+    int connectsBeforeStaleCallbacks = fixture.transport.connectCalls().size();
+    int activeTimersBeforeStaleCallbacks = fixture.scheduler.activeTaskCount();
+    fixture.transport.socket().succeedNextSend();
+    oldGenerationAcknowledgement.run();
+    fixture.transport.emitTextFromConnection(
+        1,
+        "{\"channel\":\"trades\",\"data\":[{\"coin\":\"BTC\",\"side\":\"B\","
+            + "\"px\":\"101.000\",\"sz\":\"1\",\"time\":2,\"tid\":2}]}");
+    fixture.drain();
+
+    assertEquals(eventsBeforeStaleCallbacks, fixture.sink.events().size());
+    assertEquals(connectsBeforeStaleCallbacks, fixture.transport.connectCalls().size());
+    assertEquals(activeTimersBeforeStaleCallbacks, fixture.scheduler.activeTaskCount());
   }
 
   @Test
@@ -519,20 +532,72 @@ public class HyperliquidSessionLifecycleTest {
   }
 
   @Test
-  public void closeCancelsHeartbeatAndSuppressesLateSendCallback() {
+  public void closeWithPendingReconnectTimerPreventsAnotherConnectionAttempt() {
     Fixture fixture = fixtureWithActiveBtc();
-    fixture.clock.now = 30_000L;
-    fixture.scheduler.advanceBy(30_000L);
+    fixture.transport.remoteClose(1006, "lost");
+    fixture.drain();
+    Runnable reconnect = fixture.scheduler.takeTaskAt(fixture.clock.now + 1_000L);
+    assertTrue(reconnect != null);
+
+    int connectsBeforeClose = fixture.transport.connectCalls().size();
     fixture.session.close();
     fixture.drain();
-    if (fixture.transport.socket().pendingSendCount() > 0) {
-      fixture.transport.socket().succeedNextSend();
-    }
-    fixture.scheduler.advanceBy(60_000L);
+    int eventsAfterClose = fixture.sink.events().size();
+    reconnect.run();
+    fixture.drain();
+
+    assertEquals(connectsBeforeClose, fixture.transport.connectCalls().size());
+    assertEquals(eventsAfterClose, fixture.sink.events().size());
+    assertEquals(0, fixture.budget.reservedSubscriptionSlots());
+  }
+
+  @Test
+  public void closeWithQueuedHeartbeatCallbackSuppressesHeartbeatSend() {
+    Fixture fixture = fixtureWithActiveBtc();
+    Runnable heartbeat = fixture.scheduler.takeTaskAt(fixture.clock.now + 30_000L);
+    assertTrue(heartbeat != null);
+    assertEquals(0, fixture.transport.socket().pendingSendCount());
+
+    fixture.session.close();
+    fixture.drain();
+    int eventsAfterClose = fixture.sink.events().size();
+    heartbeat.run();
     fixture.drain();
 
     assertEquals(0, fixture.budget.reservedSubscriptionSlots());
-    assertEquals(1, count(fixture.sink.events(), "login-successful"));
+    assertEquals(0, fixture.transport.socket().pendingSendCount());
+    assertEquals(eventsAfterClose, fixture.sink.events().size());
+  }
+
+  @Test
+  public void closeWithQueuedOverflowControlPreventsOverflowReconnectAfterShutdown() {
+    Fixture fixture = fixtureWithActiveBtc();
+    for (int index = 0; index < 4_096; index++) {
+      assertTrue(fixture.dispatcher.submitMarketFrame(1, ignoredMarketFrame()));
+    }
+    assertFalse(fixture.dispatcher.submitMarketFrame(1, ignoredMarketFrame()));
+    assertEquals(1, fixture.executor.queuedTaskCount());
+
+    int connectsBeforeClose = fixture.transport.connectCalls().size();
+    fixture.session.close();
+    fixture.drain();
+    int eventsAfterClose = fixture.sink.events().size();
+    fixture.scheduler.advanceBy(120_000L);
+    fixture.drain();
+
+    assertTrue(fixture.sink.systemMessages().isEmpty());
+    assertEquals(connectsBeforeClose, fixture.transport.connectCalls().size());
+    assertEquals(eventsAfterClose, fixture.sink.events().size());
+    assertEquals(0, fixture.budget.reservedSubscriptionSlots());
+  }
+
+  private static Runnable ignoredMarketFrame() {
+    return new Runnable() {
+      @Override
+      public void run() {
+        throw new AssertionError("queued market frame must be discarded");
+      }
+    };
   }
 
   private static Fixture fixtureWithActiveBtc() {
@@ -733,6 +798,10 @@ public class HyperliquidSessionLifecycleTest {
         tasks.removeFirst().run();
       }
     }
+
+    private int queuedTaskCount() {
+      return tasks.size();
+    }
   }
 
   private static final class Clock implements LongSupplier {
@@ -774,6 +843,27 @@ public class HyperliquidSessionLifecycleTest {
         tasks.remove(due);
         due.task.run();
       }
+    }
+
+    private Runnable takeTaskAt(long due) {
+      for (int index = 0; index < tasks.size(); index++) {
+        Task task = tasks.get(index);
+        if (!task.cancelled && task.due == due) {
+          tasks.remove(index);
+          return task.task;
+        }
+      }
+      return null;
+    }
+
+    private int activeTaskCount() {
+      int count = 0;
+      for (Task task : tasks) {
+        if (!task.cancelled) {
+          count++;
+        }
+      }
+      return count;
     }
 
     private static final class Task implements Cancellable, Comparable<Task> {
