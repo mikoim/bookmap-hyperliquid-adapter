@@ -1,1 +1,4 @@
 .worktrees/
+.gradle/
+build/
+references/
