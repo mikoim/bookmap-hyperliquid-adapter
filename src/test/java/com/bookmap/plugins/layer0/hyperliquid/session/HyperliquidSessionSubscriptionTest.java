@@ -496,14 +496,150 @@ public class HyperliquidSessionSubscriptionTest {
     assertEquals(1, fixture.sink.trades().size());
   }
 
+  @Test
+  public void activationPublishesAllInitialLevelsThenPendingTradesInOrder() {
+    Fixture fixture = new Fixture();
+    fixture.login();
+    fixture.sink.events().clear();
+    fixture.session.subscribe("BTC", "", "PERPETUAL");
+    fixture.drain();
+    fixture.completeSubscriptionSends();
+    String first = trade("BTC", "B", "100.000", "1", 11L, 11L);
+    String second = trade("BTC", "A", "102.000", "2", 12L, 12L);
+    fixture.receive(trades(first, second));
+    fixture.receive(multiBook("BTC", 3L));
+    fixture.drain();
+    fixture.receive(ack(SubscriptionType.L2_BOOK));
+    fixture.receive(ack(SubscriptionType.TRADES));
+    fixture.drain();
+
+    assertEquals(
+        Arrays.asList(
+            "instrument-added:BTC",
+            "depth:BTC:1000000:100",
+            "depth:BTC:1010000:200",
+            "depth:BTC:1020000:300",
+            "depth:BTC:1030000:400",
+            "trade:BTC:1000000.0:100",
+            "trade:BTC:1020000.0:200"),
+        fixture.sink.events());
+  }
+
+  @Test
+  public void pendingStaleInvalidAndForeignBooksCannotReplaceCandidate() {
+    Fixture fixture = new Fixture();
+    fixture.login();
+    fixture.session.subscribe("BTC", "", "PERPETUAL");
+    fixture.drain();
+    fixture.completeSubscriptionSends();
+    fixture.receive(book("BTC", 5L, "100.000", "1"));
+    fixture.drain();
+    fixture.receive(book("BTC", 4L, "101.000", "2"));
+    fixture.receive("{\"channel\":\"l2Book\",\"data\":{\"coin\":\"BTC\"}}");
+    fixture.receive(book("ETH", 6L, "101.000", "2"));
+    fixture.drain();
+    fixture.receive(ack(SubscriptionType.L2_BOOK));
+    fixture.receive(ack(SubscriptionType.TRADES));
+    fixture.drain();
+    assertEquals(Arrays.asList("BTC"), fixture.sink.addedAliases());
+    assertTrue(fixture.sink.events().contains("depth:BTC:1000000:100"));
+    assertFalse(fixture.sink.events().contains("depth:BTC:1010000:200"));
+  }
+
+  @Test
+  public void activeStaleInvalidAndForeignBooksLeaveBaselineForLaterDiff() {
+    Fixture fixture = new Fixture();
+    fixture.activateBtc();
+    fixture.sink.events().clear();
+    fixture.receive(book("BTC", 0L, "100.000", "2"));
+    fixture.receive("{\"channel\":\"l2Book\",\"data\":{\"coin\":\"BTC\"}}");
+    fixture.receive(book("ETH", 2L, "101.000", "2"));
+    fixture.receive(book("BTC", 2L, "101.000", "2"));
+    fixture.drain();
+    assertTrue(fixture.sink.events().contains("depth:BTC:1000000:0"));
+    assertTrue(fixture.sink.events().contains("depth:BTC:1010000:200"));
+    assertFalse(fixture.sink.events().contains("depth:BTC:1000000:200"));
+  }
+
+  @Test
+  public void activeTargetableRejectionClearsOnlyTargetAliasAndUnsubscribesBothFeeds() {
+    Fixture fixture = new Fixture();
+    fixture.loginWithSymbols(2);
+    fixture.session.subscribe("BTC", "", "PERPETUAL");
+    fixture.session.subscribe("C1", "", "PERPETUAL");
+    fixture.drain();
+    fixture.completeSubscriptionSends(4);
+    fixture.receive(bookFor("BTC", 1L, "100.000", "1"));
+    fixture.receive(ackFor("BTC", SubscriptionType.L2_BOOK));
+    fixture.receive(ackFor("BTC", SubscriptionType.TRADES));
+    fixture.receive(bookFor("C1", 1L, "100.000", "1"));
+    fixture.receive(ackFor("C1", SubscriptionType.L2_BOOK));
+    fixture.receive(ackFor("C1", SubscriptionType.TRADES));
+    fixture.drain();
+    fixture.sink.events().clear();
+    fixture.transport.clearSuccessfulSendBodies();
+    fixture.receive(errorFor("BTC", SubscriptionType.L2_BOOK));
+    fixture.drain();
+    fixture.transport.socket().succeedNextSend();
+    fixture.drain();
+    fixture.transport.socket().succeedNextSend();
+    fixture.drain();
+    assertEquals(Arrays.asList("BTC"), fixture.sink.removedAliases());
+    assertEquals(2, fixture.budget.reservedSubscriptionSlots());
+    assertEquals(
+        Arrays.asList(
+            new SubscriptionKey("BTC", SubscriptionType.L2_BOOK).unsubscribeJson(),
+            new SubscriptionKey("BTC", SubscriptionType.TRADES).unsubscribeJson()),
+        fixture.transport.socket().successfulSendBodies());
+    assertTrue(fixture.sink.events().contains("depth:BTC:1000000:0"));
+  }
+
+  @Test
+  public void activeUserUnsubscribeRemovesOnceWithoutPublishingDepth() {
+    Fixture fixture = new Fixture();
+    fixture.activateBtc();
+    fixture.sink.events().clear();
+    fixture.session.unsubscribe("BTC");
+    fixture.drain();
+    assertEquals(Arrays.asList("BTC"), fixture.sink.removedAliases());
+    assertTrue(fixture.sink.events().contains("instrument-removed:BTC"));
+    assertFalse(fixture.sink.events().toString().contains("depth:"));
+  }
+
+  @Test
+  public void pendingDeadlineSurvivesAReconnectGeneration() {
+    Fixture fixture = new Fixture();
+    fixture.login();
+    fixture.session.subscribe("BTC", "", "PERPETUAL");
+    fixture.drain();
+    fixture.completeSubscriptionSends();
+    fixture.session.onDisconnected(
+        fixture.generation,
+        new TransportFailure(TransportFailure.Kind.NETWORK, "connection lost", null));
+    fixture.drain();
+    fixture.session.onSocketOpened(2L);
+    fixture.drain();
+    fixture.advanceBy(10_000L);
+    assertTrue(fixture.sink.addedAliases().isEmpty());
+    assertEquals(0, fixture.budget.reservedSubscriptionSlots());
+  }
+
   private static String ack(SubscriptionType type) {
+    return ackFor("BTC", type);
+  }
+
+  private static String ackFor(String coin, SubscriptionType type) {
     String prefix =
         "{\"channel\":\"subscriptionResponse\",\"data\":{\"method\":\"subscribe\","
             + "\"subscription\":{\"type\":\"";
-    return prefix + type.wireName() + "\",\"coin\":\"BTC\"}}}";
+    return prefix + type.wireName() + "\",\"coin\":\"" + coin + "\"}}}";
   }
 
   private static String book(String coin, long time, String price, String size) {
+    return bookFor(coin, time, price, size);
+  }
+
+  private static String bookFor(String coin, long time, String price, String size) {
     return "{\"channel\":\"l2Book\",\"data\":{\"coin\":\""
         + coin
         + "\",\"time\":"
@@ -515,13 +651,28 @@ public class HyperliquidSessionSubscriptionTest {
         + "\"}],[]]}}";
   }
 
+  private static String multiBook(String coin, long time) {
+    return "{\"channel\":\"l2Book\",\"data\":{\"coin\":\""
+        + coin
+        + "\",\"time\":"
+        + time
+        + ",\"levels\":[[{\"px\":\"100.000\",\"sz\":\"1\"},{\"px\":\"101.000\",\"sz\":\"2\"}],"
+        + "[{\"px\":\"102.000\",\"sz\":\"3\"},{\"px\":\"103.000\",\"sz\":\"4\"}]]}}";
+  }
+
   private static String error(SubscriptionType type) {
+    return errorFor("BTC", type);
+  }
+
+  private static String errorFor(String coin, SubscriptionType type) {
     if (type == null) {
       return "{\"channel\":\"error\",\"data\":{}}";
     }
     return "{\"channel\":\"error\",\"data\":{\"subscription\":{\"type\":\""
         + type.wireName()
-        + "\",\"coin\":\"BTC\"}}}";
+        + "\",\"coin\":\""
+        + coin
+        + "\"}}}";
   }
 
   private static int countContaining(List<String> values, String expectedPart) {
@@ -665,10 +816,14 @@ public class HyperliquidSessionSubscriptionTest {
     }
 
     void completeSubscriptionSends() {
-      transport.socket().succeedNextSend();
-      drain();
-      transport.socket().succeedNextSend();
-      drain();
+      completeSubscriptionSends(2);
+    }
+
+    void completeSubscriptionSends(int count) {
+      for (int index = 0; index < count; index++) {
+        transport.socket().succeedNextSend();
+        drain();
+      }
     }
 
     void advanceBy(long elapsed) {
