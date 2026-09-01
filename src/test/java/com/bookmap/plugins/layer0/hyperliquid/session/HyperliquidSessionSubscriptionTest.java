@@ -599,11 +599,22 @@ public class HyperliquidSessionSubscriptionTest {
     Fixture fixture = new Fixture();
     fixture.activateBtc();
     fixture.sink.events().clear();
+    fixture.transport.clearSuccessfulSendBodies();
     fixture.session.unsubscribe("BTC");
+    fixture.drain();
+    fixture.transport.socket().succeedNextSend();
+    fixture.drain();
+    fixture.transport.socket().succeedNextSend();
     fixture.drain();
     assertEquals(Arrays.asList("BTC"), fixture.sink.removedAliases());
     assertTrue(fixture.sink.events().contains("instrument-removed:BTC"));
     assertFalse(fixture.sink.events().toString().contains("depth:"));
+    assertEquals(0, fixture.budget.reservedSubscriptionSlots());
+    assertEquals(
+        Arrays.asList(
+            new SubscriptionKey("BTC", SubscriptionType.L2_BOOK).unsubscribeJson(),
+            new SubscriptionKey("BTC", SubscriptionType.TRADES).unsubscribeJson()),
+        fixture.transport.socket().successfulSendBodies());
   }
 
   @Test
@@ -613,13 +624,14 @@ public class HyperliquidSessionSubscriptionTest {
     fixture.session.subscribe("BTC", "", "PERPETUAL");
     fixture.drain();
     fixture.completeSubscriptionSends();
+    fixture.advanceBy(9_000L);
     fixture.session.onDisconnected(
         fixture.generation,
         new TransportFailure(TransportFailure.Kind.NETWORK, "connection lost", null));
     fixture.drain();
     fixture.session.onSocketOpened(2L);
     fixture.drain();
-    fixture.advanceBy(10_000L);
+    fixture.advanceBy(1_000L);
     assertTrue(fixture.sink.addedAliases().isEmpty());
     assertEquals(0, fixture.budget.reservedSubscriptionSlots());
   }
