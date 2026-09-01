@@ -5,6 +5,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget;
+import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget.FrameReservation;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.ManualScheduler;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.StateEventDispatcher;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMessageParser;
@@ -13,6 +14,7 @@ import com.bookmap.plugins.layer0.hyperliquid.session.HyperliquidSession;
 import com.bookmap.plugins.layer0.hyperliquid.session.HyperliquidSessionApi;
 import com.bookmap.plugins.layer0.hyperliquid.session.SessionSink;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -101,9 +103,11 @@ public class ProviderEndToEndTest {
     fixture.transport.remoteClose(1006, "lost");
     fixture.drain();
     assertEquals(1, fixture.admin.connectionLostCount);
+    assertEquals(1_000L, fixture.scheduler.nextDelayMillis());
     fixture.advance(1_000L);
     fixture.transport.openSocket();
     fixture.drain();
+    assertEquals(2, fixture.transport.connectCalls().size());
     fixture.completeSends();
     fixture.ack("BTC", "l2Book");
     fixture.ack("BTC", "trades");
@@ -139,6 +143,7 @@ public class ProviderEndToEndTest {
     handshakeFailure.transport.failSocket(new IllegalStateException("handshake failed"));
     handshakeFailure.drain();
     handshakeFailure.closeTwice();
+    assertTrue(handshakeFailure.transport.connectCancelled());
     handshakeFailure.assertClosed();
   }
 
@@ -179,12 +184,12 @@ public class ProviderEndToEndTest {
     fixture.drain();
     assertEquals(depthsBeforeInvalid, fixture.data.depths.size());
 
-    for (int i = 0; i < 4_096; i++) {
+    for (int i = 0; i < 4_095; i++) {
       fixture.transport.emitTextFromConnection(
           0, fixture.bookJson("BTC", i + 2L, "100", "1", "101", "2"));
     }
     fixture.transport.emitTextFromConnection(
-        0, fixture.bookJson("BTC", 10_000L, "300", "1", "301", "2"));
+        0, fixture.multiTradeJson("BTC", 10_000L, "300", "301", 7L, 8L));
     fixture.drain();
     assertTrue(fixture.admin.systemMessages.contains("market-data frame queue overflow"));
     assertEquals(depthsBeforeInvalid, fixture.data.depths.size());
@@ -203,6 +208,15 @@ public class ProviderEndToEndTest {
     assertEquals(1, fixture.admin.connectionRestoredCount);
     assertEquals("depth:BTC:1000000:0", fixture.data.depths.get(depthsBeforeInvalid));
     assertEquals("depth:BTC:1000000:100", fixture.data.depths.get(depthsBeforeInvalid + 1));
+
+    for (int i = 0; i < 4_095; i++) {
+      fixture.transport.emitTextFromConnection(
+          1, fixture.bookJson("BTC", i + 20_000L, "100", "1", "101", "2"));
+    }
+    fixture.transport.emitTextFromConnection(
+        1, fixture.multiTradeJson("BTC", 30_000L, "400", "401", 9L, 10L));
+    fixture.drain();
+    assertEquals(2, count(fixture.admin.systemMessages, "market-data frame queue overflow"));
     fixture.closeTwice();
     fixture.assertClosed();
   }
@@ -272,6 +286,12 @@ public class ProviderEndToEndTest {
     second.closeTwice();
     first.assertClosed();
     second.assertClosed();
+
+    assertFalse(budget.tryAcquireFrames(0L, 1).acquired());
+    assertFalse(budget.tryAcquireFrames(59_999L, 1).acquired());
+    FrameReservation available = budget.tryAcquireFrames(60_000L, 1).permit();
+    assertTrue(available != null);
+    available.close();
   }
 
   @Test
@@ -294,6 +314,10 @@ public class ProviderEndToEndTest {
     second.advance(10L);
     assertEquals(0, second.transport.connectCalls().size());
     assertEquals(59_990L, second.scheduler.nextDelayMillis());
+    second.advance(59_990L);
+    assertEquals(1, second.transport.connectCalls().size());
+    second.transport.openSocket();
+    second.drain();
     second.closeTwice();
     second.assertClosed();
   }
@@ -309,6 +333,16 @@ public class ProviderEndToEndTest {
     } catch (Exception failure) {
       throw new AssertionError("unable to construct deterministic budget", failure);
     }
+  }
+
+  private static int count(List<String> values, String expected) {
+    int count = 0;
+    for (String value : values) {
+      if (expected.equals(value)) {
+        count++;
+      }
+    }
+    return count;
   }
 
   private static final class Fixture {
@@ -462,6 +496,32 @@ public class ProviderEndToEndTest {
               + "}]}");
     }
 
+    private String multiTradeJson(
+        String coin,
+        long time,
+        String firstPrice,
+        String secondPrice,
+        long firstTid,
+        long secondTid) {
+      return "{\"channel\":\"trades\",\"data\":[{\"coin\":\""
+          + coin
+          + "\",\"side\":\"B\",\"px\":\""
+          + firstPrice
+          + "\",\"sz\":\"1\",\"time\":"
+          + time
+          + ",\"tid\":"
+          + firstTid
+          + "},{\"coin\":\""
+          + coin
+          + "\",\"side\":\"A\",\"px\":\""
+          + secondPrice
+          + "\",\"sz\":\"1\",\"time\":"
+          + time
+          + ",\"tid\":"
+          + secondTid
+          + "}]}";
+    }
+
     private void error(String coin) {
       String target =
           coin == null ? "" : ",\"subscription\":{\"type\":\"l2Book\",\"coin\":\"" + coin + "\"}";
@@ -488,21 +548,37 @@ public class ProviderEndToEndTest {
 
     private void assertClosed() {
       assertTrue(executor.shutdownRequested);
+      assertEquals(0, executor.queuedTaskCount());
       assertTrue(transport.closed());
       assertFalse(transport.socket().isOpen());
       assertEquals(0, transport.socket().pendingSendCount());
+      assertEquals(transport.httpHandleCount(), transport.settledHttpHandleCount());
+      assertTrue(transport.allHttpHandlesSettled());
+      assertEquals(transport.connectionHandleCount(), transport.settledConnectHandleCount());
+      assertTrue(transport.allConnectHandlesSettled());
       assertEquals(-1L, scheduler.nextDelayMillis());
+      assertEquals(0, budgetInt("openConnections"));
+      assertEquals(0, budgetInt("heldFrames"));
       assertEquals(0, budget.reservedSubscriptionSlots());
       int eventCount = trace.size();
-      if (!transport.connectCalls().isEmpty()) {
-        transport.emitTextFromConnection(0, bookJson("BTC", 99_999L, "333", "1", "334", "1"));
-        String lateTrade =
-            "{\"channel\":\"trades\",\"data\":[{\"coin\":\"BTC\",\"side\":\"B\","
-                + "\"px\":\"333\",\"sz\":\"1\",\"time\":99999,\"tid\":99999}]}";
-        transport.emitTextFromConnection(0, lateTrade);
-        drain();
+      transport.lateCompleteMeta(200, metadata("BTC"));
+      transport.lateOpenConnections();
+      transport.socket().lateSucceedAllSends();
+      for (int index = 0; index < transport.connectionHandleCount(); index++) {
+        transport.emitTextFromConnection(index, bookJson("BTC", 99_999L, "333", "1", "334", "1"));
       }
+      drain();
       assertEquals(eventCount, trace.size());
+    }
+
+    private int budgetInt(String fieldName) {
+      try {
+        Field field = HyperliquidProcessBudget.class.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return field.getInt(budget);
+      } catch (Exception failure) {
+        throw new AssertionError("unable to inspect budget state", failure);
+      }
     }
 
     private static LoginData mainnetLogin() {

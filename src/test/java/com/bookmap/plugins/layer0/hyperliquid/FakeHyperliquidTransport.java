@@ -13,10 +13,13 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
   private String httpBody;
   private long httpTimeoutMillis;
   private HttpCallback httpCallback;
+  private final List<HttpCallback> httpCallbacks = new ArrayList<HttpCallback>();
+  private final List<TrackedHandle> httpHandles = new ArrayList<TrackedHandle>();
   private final List<URI> connectCalls = new ArrayList<URI>();
   private long connectTimeoutMillis;
   private SocketCallback socketCallback;
   private final List<SocketCallback> socketCallbacks = new ArrayList<SocketCallback>();
+  private final List<TrackedHandle> connectHandles = new ArrayList<TrackedHandle>();
   private final FakeSocket socket = new FakeSocket();
   private boolean httpCancelled;
   private boolean connectCancelled;
@@ -35,12 +38,10 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
     httpBody = body;
     httpTimeoutMillis = timeoutMillis;
     httpCallback = callback;
-    return new Cancellable() {
-      @Override
-      public void cancel() {
-        httpCancelled = true;
-      }
-    };
+    httpCallbacks.add(callback);
+    TrackedHandle handle = new TrackedHandle(true);
+    httpHandles.add(handle);
+    return handle;
   }
 
   @Override
@@ -49,12 +50,9 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
     connectTimeoutMillis = timeoutMillis;
     socketCallback = callback;
     socketCallbacks.add(callback);
-    return new Cancellable() {
-      @Override
-      public void cancel() {
-        connectCancelled = true;
-      }
-    };
+    TrackedHandle handle = new TrackedHandle(false);
+    connectHandles.add(handle);
+    return handle;
   }
 
   @Override
@@ -103,31 +101,95 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
     return closed;
   }
 
+  public boolean allHttpHandlesSettled() {
+    for (TrackedHandle handle : httpHandles) {
+      if (!handle.cancelled && !handle.completed) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  public int httpHandleCount() {
+    return httpHandles.size();
+  }
+
+  public int settledHttpHandleCount() {
+    int settled = 0;
+    for (TrackedHandle handle : httpHandles) {
+      if (handle.cancelled || handle.completed) {
+        settled++;
+      }
+    }
+    return settled;
+  }
+
+  public boolean allConnectHandlesSettled() {
+    for (TrackedHandle handle : connectHandles) {
+      if (!handle.cancelled && !handle.completed) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  public int settledConnectHandleCount() {
+    int settled = 0;
+    for (TrackedHandle handle : connectHandles) {
+      if (handle.cancelled || handle.completed) {
+        settled++;
+      }
+    }
+    return settled;
+  }
+
+  public int connectionHandleCount() {
+    return connectHandles.size();
+  }
+
   public void emitTextFromConnection(int connectionIndex, String text) {
     socketCallbacks.get(connectionIndex).onText(text);
   }
 
   public void completeMeta(int status, String body) {
+    httpHandles.get(httpHandles.size() - 1).completed = true;
     httpCallback.onComplete(status, body, null);
   }
 
   public void failMeta(Throwable failure) {
+    httpHandles.get(httpHandles.size() - 1).completed = true;
     httpCallback.onComplete(0, null, failure);
   }
 
+  public void lateCompleteMeta(int status, String body) {
+    for (HttpCallback callback : httpCallbacks) {
+      callback.onComplete(status, body, null);
+    }
+  }
+
   public void openSocket() {
+    connectHandles.get(connectHandles.size() - 1).completed = true;
     socket.open = true;
     socketCallback.onOpen(socket);
   }
 
   public void remoteClose(int code, String reason) {
+    connectHandles.get(connectHandles.size() - 1).completed = true;
     socket.open = false;
     socketCallback.onClose(code, reason);
   }
 
   public void failSocket(Throwable failure) {
+    connectHandles.get(connectHandles.size() - 1).completed = true;
     socket.open = false;
     socketCallback.onFailure(failure);
+  }
+
+  public void lateOpenConnections() {
+    for (SocketCallback callback : socketCallbacks) {
+      socket.open = true;
+      callback.onOpen(socket);
+    }
   }
 
   public void clearSuccessfulSendBodies() {
@@ -139,6 +201,7 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
 
     private boolean open;
     private final List<PendingSend> pending = new ArrayList<PendingSend>();
+    private final List<SendCallback> allSendCallbacks = new ArrayList<SendCallback>();
     private final List<String> successfulSendBodies = new ArrayList<String>();
     private String closeReason;
     private int closeCode;
@@ -152,6 +215,7 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
         throwUnchecked(failure);
       }
       pending.add(new PendingSend(body, callback));
+      allSendCallbacks.add(callback);
     }
 
     @Override
@@ -179,6 +243,12 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
 
     public int pendingSendCount() {
       return pending.size();
+    }
+
+    public void lateSucceedAllSends() {
+      for (SendCallback callback : allSendCallbacks) {
+        callback.onSuccess();
+      }
     }
 
     public List<String> successfulSendBodies() {
@@ -213,6 +283,26 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
       private PendingSend(String body, SendCallback callback) {
         this.body = body;
         this.callback = callback;
+      }
+    }
+  }
+
+  private final class TrackedHandle implements Cancellable {
+    private final boolean http;
+    private boolean cancelled;
+    private boolean completed;
+
+    private TrackedHandle(boolean http) {
+      this.http = http;
+    }
+
+    @Override
+    public void cancel() {
+      cancelled = true;
+      if (http) {
+        httpCancelled = true;
+      } else {
+        connectCancelled = true;
       }
     }
   }
