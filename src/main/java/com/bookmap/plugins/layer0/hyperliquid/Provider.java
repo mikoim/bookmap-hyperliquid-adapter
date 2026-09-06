@@ -16,6 +16,7 @@ import com.bookmap.plugins.layer0.hyperliquid.session.SessionSink;
 import com.bookmap.plugins.layer0.hyperliquid.transport.HyperliquidTransport;
 import com.bookmap.plugins.layer0.hyperliquid.transport.JettyHyperliquidTransport;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -102,14 +103,13 @@ public final class Provider extends ExternalLiveBaseProvider {
   public String formatPrice(String alias, double price) {
     InstrumentInfo instrument = activeInstruments.get(alias);
     double pips = instrument == null ? FALLBACK_PIPS : instrument.pips;
+    // Bookmap passes the real price (not price units); the API takes (pips, price).
     try {
-      return formatPriceDefault(price, pips);
+      return formatPriceDefault(pips, price);
     } catch (NoClassDefFoundError missingBookmapFormatter) {
       // api-core 7.4.0.10's test artifact omits the formatter it references.
-      return BigDecimal.valueOf(price)
-          .multiply(BigDecimal.valueOf(pips))
-          .stripTrailingZeros()
-          .toPlainString();
+      int scale = Math.max(0, BigDecimal.valueOf(pips).stripTrailingZeros().scale());
+      return BigDecimal.valueOf(price).setScale(scale, RoundingMode.HALF_UP).toPlainString();
     }
   }
 

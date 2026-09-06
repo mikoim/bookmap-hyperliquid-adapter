@@ -195,7 +195,9 @@ public class ProviderTest {
     assertTrue(data.trades.get(0).isBidAggressor);
     assertFalse(data.trades.get(1).isOtc);
     assertFalse(data.trades.get(1).isBidAggressor);
-    assertEquals("1.23", provider.formatPrice("SOL", 123d));
+    // Bookmap passes the real price; it is rendered with the instrument's pips scale.
+    assertEquals("123.00", provider.formatPrice("SOL", 123d));
+    assertEquals("123.46", provider.formatPrice("SOL", 123.456d));
     assertEquals("123", provider.formatPrice("unknown", 123d));
     assertEquals("Hyperliquid realtime", provider.getSource());
     factory.sink.onInstrumentRemoved("SOL");
