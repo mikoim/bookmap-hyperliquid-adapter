@@ -78,8 +78,16 @@ Context7 上に存在しない。上表は実観測に基づく。
    プロファイルのヘッダーを `ClientUpgradeRequest` に設定。トランスポート IF にヘッダーマップを追加。
 5. `SubscriptionKey` — l2Book 購読 JSON 生成にオプションパラメータ(`nSigFigs`/`nLevels`/`mantissa`)対応。
    null は省略。等価性は `coin+type` のまま変更しない(ACK 照合は coin+type のみ参照で確認済み)。
+   l2Book パラメータは `HyperliquidSession` がログイン時の `SourceProfile` から保持し、
+   `SubscriptionRecord` 生成時に l2Book キーへ付与する(trades キーは無パラメータのまま)。
 6. `HyperliquidMessageParser` — 購読応答の許容フィールドに `nLevels` を追加(現状は ProtocolException)。
-   l2Book レベルの `sz` 検証を「非負(0 許容)」に緩和。
+   l2Book レベルの `sz` 検証を「非負(0 許容)」に緩和(trades の `sz` は従来どおり正のみ)。
+   パーサーより下流の板正規化(`OrderBookSnapshotDiff.normalize` → `PerpetualInstrument.toSizeUnits`)は
+   現状 0 を `NON_POSITIVE` として拒否するため、**板レベルの正規化も `sz=0` を受理**するよう変更する
+   (0 は 0 サイズユニットに変換する。trades 側の `toSizeUnits` 呼び出しは正のみを要求する現行挙動を保つ)。
+   `sz=0` レベルの意味はモードで決まる: SNAPSHOT モードでは「そのレベルは存在しない」として正規化時に捨てる
+   (Hyperliquid/Hyperdash が 0 を送る場合の防御。ベースラインに 0 を保持しない)。
+   SEED_THEN_DELTA モードでは差分中の 0 を「除去」として扱い、シード中の 0 は捨てる。
 7. **板の新規差分経路** — パーサーは l2Book フレームを従来どおり `BookSnapshot`(レベル列)として生成する
    (`sz=0` も受理)。**シード/差分の区別はワイヤ形式では判別不能なため、セッション側で行う**:
    SEED_THEN_DELTA モードの `SubscriptionRecord` は「現世代の初回フレーム受信済みか」のフラグと
@@ -96,15 +104,30 @@ Context7 上に存在しない。上表は実観測に基づく。
      - まだアクティベーション前(PENDING_BOOK)ならステージド板に畳み込むのみで発行しない
        (シード後・両 ACK 揃う前の差分を全量と誤認して発行する欠落を防ぐ)。
      - 回復中ならステージド板に畳み込むのみで発行しない(回復完了時にまとめて全量置換するため)。
-     - アクティブかつ非回復なら 1 レベルずつその場で `DepthUpdate` へ変換して発行する
-       (`sz>0` 更新、`sz=0` 除去)。
-   - **アクティベーション**(SNAPSHOT モードの `activateIfReady` 相当): ステージド板の全レベルを
-     `DepthUpdate` として発行し、発行済み価格集合を初期化する。
-   - **回復完了時**(SNAPSHOT モードの `maybeRestore` 相当): ステージド板と発行済み価格集合を突き合わせ、
-     新シードに含まれない旧レベルは `DepthUpdate size=0` で除去、差異のあるレベルは更新として発行する。
-8. 各 `SubscriptionRecord` — Borsa モードのみ「発行済み価格集合」を保持し、世代境界で上記の
-   置換・除去ルールを適用する。SNAPSHOT モードには既存の `OrderBookSnapshotDiff` ベースラインがあり
-   追加状態は不要。
+     - アクティブかつ非回復なら 1 レベルずつその場で `DepthUpdate` へ変換して発行し、
+       発行済み板にも同じ変更を反映する(`sz>0` 更新、`sz=0` 除去)。
+   - **アクティベーション**(SNAPSHOT モードの `activateIfReady` 相当): 現世代のシードが受信済みであることを
+     条件に加え(SNAPSHOT モードの `pendingBook() == null` 判定に相当)、ステージド板の全レベルを
+     `DepthUpdate` として発行し、そのステージド板をそのまま発行済み板とする。
+   - **回復完了時**(SNAPSHOT モードの `maybeRestore` 相当): 現世代のシードが受信済みなら
+     **板置換**を行う(下記)。未受信なら何もせず、後続のシード到着時に置換する。
+   - **アクティブかつ非回復状態でのシード受信**: 現行プロトコルでは ACK が板フレームより先に届くため、
+     再接続時は両 ACK で回復完了が先に成立し、その後にシードが届くのが通常順序である
+     (SNAPSHOT モードが `requestFullResync` で吸収している順序)。この場合はシードで
+     ステージド板を新規作成し、**その場で板置換**を発行する。
+   - **板置換**(共通ルール): 発行済み板の価格のうち現世代のステージド板(シード+畳み込み済み差分)に
+     無いものは `DepthUpdate size=0` で除去し、ステージド板の全レベルを更新として発行する
+     (サイズ同一でも再送してよい。SNAPSHOT モードの
+     `apply(book, true)` と同じ「旧全削除+新全再生」の意味論を、除去対象を差分に絞って行う)。
+     置換後、新ステージド板が発行済み板になる。
+   - **世代境界**(`beginGeneration` 相当): 「現世代の初回フレーム受信済み」フラグを落とし、
+     ステージド板を破棄する(発行済み板は保持する)。これにより旧世代のステージド板に新世代の差分が
+     畳み込まれることを防ぎ、PENDING_BOOK 中に世代が変わった場合は新世代のシードが来るまで
+     アクティベートしない。
+8. 各 `SubscriptionRecord` — SEED_THEN_DELTA モードのみ「発行済み板」(価格→サイズ、Bookmap に発行済みの
+   状態)と「現世代のステージド板」を保持し、上記の置換・除去ルールを適用する。SNAPSHOT モードには既存の
+   `OrderBookSnapshotDiff` ベースラインがあり追加状態は不要。ステージド板・発行済み板は差分に現れた価格の
+   分だけ増減し(除去で縮む)、上限は設けない。
 
 ## データフロー
 
@@ -125,13 +148,15 @@ Provider.login(LoginData)
 | ソース | 処理 |
 |---|---|
 | Hyperliquid/Hyperdash (SNAPSHOT) | 現行どおり: 全量スナップショット → `OrderBookSnapshotDiff` → `DepthUpdate` 群 |
-| Borsa 初回フレーム | 全量シードとして採用(PENDING_BOOK)→ アクティベート時に全レベルを発行 |
+| Borsa 初回フレーム(世代ごと) | 全量シードとして採用。PENDING_BOOK ならアクティベート時に全レベルを発行、ACTIVE なら発行済み板との板置換を発行(項目 7) |
 | Borsa 2 回目以降(差分) | 各レベルを直接 `DepthUpdate` へ: sz>0 更新、sz=0 除去。`OrderBookSnapshotDiff` 経由なし |
 
 ### 再接続・回復
 
 - 現行の世代(generation)再購読リプレイ機構をそのまま使用。
-- 新規世代の初回 l2Book フレームは必ずシードとして扱い、旧世代発行済みの残存レベルは全除去。
+- 新規世代の初回 l2Book フレームは必ずシードとして扱い、板置換(項目 7)で新シードに無い旧世代の
+  発行済みレベルを除去し、新シードの全レベルを発行する。回復完了(両 ACK)より後にシードが届く
+  通常順序でも、シード到着時点で同じ板置換を行う。
 - タイムスタンプの鮮度判定は現行コードが既に `time < lastAcceptedBookTime` のみを STALE として棄却し
   等号を受理する(`OrderBookSnapshotDiff.validate` / `acceptRecoveryBook` 実測)。この規則は全ソース共通で変更しない。
   Borsa がシードと直後の差分に**同一タイムスタンプ**を付けること(実測済み)とも整合する。
@@ -144,18 +169,24 @@ Provider.login(LoginData)
 
 ## エラー処理と運用制約
 
-- Hyperdash の未認証 403 はハンドシェイクタイムアウト系の既存再試行経路に乗るが、
-  SourceProfile の固定ヘッダーが正しく適用されることを単体テストで担保する。
+- Hyperdash の未認証 403 は Jetty の `SocketCallback.onFailure`(UpgradeException)として届き、
+  既存の切断→再接続経路に乗る。SourceProfile の固定ヘッダーが正しく適用されることを単体テストで担保する。
+- 市場フレームキュー溢れ(`onMarketOverflow`)は現行どおり `connector.reconnect` で世代を切り替える。
+  SEED_THEN_DELTA モードは差分の欠落を次フレームで自己修復できないが、世代切替により新シードが届き
+  板置換で再同期されるため、追加規則は不要。
 - プロセス予算(`HyperliquidProcessBudget`)は既存共有プール(connections=10/attempts=30/frames=2000/subscriptions=1000/60s)を継続使用。
   Borsa/Hyperdash の独自レート制限は不明のため、Hyperliquid 向け保守制限をそのまま適用する。
-- 差分モードで「発行済み集合にない sz=0 除去」は黙殺する。
+- 差分モードで「発行済み板(またはステージド板)に無い価格への sz=0 除去」は黙殺する。
 - データの正確性はソースの信頼に依存し、アダプターは Hyperliquid 本体との一致を検証しない。
 
 ## テスト戦略
 
 1. ログイン解決(ソース選択 + testnet 組み合わせ、既定/未知値フォールバック)
-2. パーサー: sz=0 許容、ACK 応答の `nLevels`/`nSigFigs` 許容、不正値拒否
-3. 差分モード: シード→差分反映、世代変更時の旧レベル除去、古いタイムスタンプ破棄、未知除去黙殺
+2. パーサー: sz=0 許容、ACK 応答の `nLevels`/`nSigFigs` 許容、不正値拒否。
+   板正規化: sz=0 受理(SNAPSHOT モードでは捨てる、差分モードでは除去)、trades の sz=0 は従来どおり拒否
+3. 差分モード: シード→差分反映、世代変更時の旧レベル除去、古いタイムスタンプ破棄、未知除去黙殺、
+   **両 ACK(回復完了)後にシードが届く順序での板置換**、PENDING_BOOK 中の世代跨ぎで新シードまで
+   アクティベートしないこと、フレーム溢れ→再接続→新シードで再同期
 4. トランスポート: Jetty ヘッダー送信の確認、403 時の既存エラーハンドリング/再試行
 5. エンドツーエンド: Borsa 系ソースでの provider→session→parser→DepthUpdate 到達、切断→回復
 
