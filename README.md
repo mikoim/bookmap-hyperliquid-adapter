@@ -6,11 +6,13 @@ WebSocket. The `Order book source` dropdown selects Hyperliquid (default), Borsa
 the `Use Hyperliquid testnet` checkbox only applies to Hyperliquid. It never requests
 credentials and never sends orders.
 
-Runtime verification: Not verified in Bookmap runtime.
+![Bookmap heatmap for the ETH/USDC perpetual delivered by the adapter](docs/eth.webp)
 
 ## Scope and behavior
 
 The adapter supports the exact read-only perpetual scope exposed by Hyperliquid's default DEX:
+
+![The Order book source dropdown in Bookmap's Connectivity configuration dialog](docs/connector.webp)
 
 - With the Hyperliquid source, the Mainnet/Testnet checkbox selects both the metadata REST
   endpoint and the market-data WebSocket. Borsa (`wss://ws.borsa.cc/`) and Hyperdash
@@ -50,8 +52,12 @@ it is not a general runtime selection mechanism.
 
 The adapter compiles to Java 8 bytecode. The thin adapter JAR is
 `build/libs/hyperliquid-adapter-1.0.0.jar`; Bookmap supplies the API, Gson, and Jetty dependencies.
-Load the module through its Bookmap annotations, or place it in the Bookmap `Layer0ApiModules`
-directory according to the host installation's module-loading configuration.
+Load the module through its Bookmap annotations, or copy the JAR into the `API/Layer0ApiModules`
+directory of the Bookmap installation. On Linux that path is:
+
+```text
+$HOME/.bookmap/API/Layer0ApiModules/hyperliquid-adapter-1.0.0.jar
+```
 
 ## Operating limits
 
@@ -81,8 +87,4 @@ Run the independent quality gates before distributing the JAR:
 
 SpotBugs HTML and XML reports are written under `build/reports/spotbugs`. The build's
 `verifyJava8Bytecode` task checks that compiled classes use Java 8 major version 52.
-
-## Runtime verification
-
-Runtime verification: Not verified in Bookmap runtime.
 
