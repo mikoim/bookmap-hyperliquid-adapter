@@ -75,7 +75,7 @@ public final class HyperliquidConnector implements AutoCloseable {
   private final List<PendingSend> pendingSends = new ArrayList<PendingSend>();
 
   private Listener listener;
-  private HyperliquidEnvironment environment;
+  private SourceProfile profile;
   private HyperliquidTransport.Cancellable metadataRequest;
   private HyperliquidTransport.Cancellable connectRequest;
   private ConnectionPermit connectionPermit;
@@ -135,13 +135,13 @@ public final class HyperliquidConnector implements AutoCloseable {
         });
   }
 
-  /** Starts metadata discovery for the supplied environment. */
-  public void start(final HyperliquidEnvironment newEnvironment) {
+  /** Starts metadata discovery for the supplied source profile. */
+  public void start(final SourceProfile newProfile) {
     stateSubmitter.accept(
         new Runnable() {
           @Override
           public void run() {
-            startOnStateLane(newEnvironment);
+            startOnStateLane(newProfile);
           }
         });
   }
@@ -267,20 +267,20 @@ public final class HyperliquidConnector implements AutoCloseable {
         });
   }
 
-  private void startOnStateLane(HyperliquidEnvironment newEnvironment) {
+  private void startOnStateLane(SourceProfile newProfile) {
     if (closed || started) {
       return;
     }
-    if (listener == null || newEnvironment == null) {
-      throw new IllegalStateException("listener and environment must be set before start");
+    if (listener == null || newProfile == null) {
+      throw new IllegalStateException("listener and profile must be set before start");
     }
     started = true;
-    environment = newEnvironment;
+    profile = newProfile;
     try {
       transport.start();
       metadataRequest =
           transport.postJson(
-              environment.infoUri(),
+              profile.infoUri(),
               "application/json",
               "{\"type\":\"meta\"}",
               METADATA_TIMEOUT_MILLIS,
@@ -327,7 +327,7 @@ public final class HyperliquidConnector implements AutoCloseable {
   }
 
   private void attemptConnection(final boolean initial) {
-    if (closed || !started || environment == null || generationActive || connectionPermit != null) {
+    if (closed || !started || profile == null || generationActive || connectionPermit != null) {
       return;
     }
     long now = clock.getAsLong();
@@ -364,7 +364,8 @@ public final class HyperliquidConnector implements AutoCloseable {
     try {
       HyperliquidTransport.Cancellable openedRequest =
           transport.connect(
-              environment.webSocketUri(),
+              profile.webSocketUri(),
+              profile.handshakeHeaders(),
               HANDSHAKE_TIMEOUT_MILLIS,
               socketCallback(openingGeneration, initial));
       if (isCurrentGeneration(openingGeneration)) {

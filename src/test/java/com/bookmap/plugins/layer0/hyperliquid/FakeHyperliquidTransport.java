@@ -3,7 +3,9 @@ package com.bookmap.plugins.layer0.hyperliquid;
 import com.bookmap.plugins.layer0.hyperliquid.transport.HyperliquidTransport;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Deterministic transport double for connector boundary tests. */
 public final class FakeHyperliquidTransport implements HyperliquidTransport {
@@ -16,6 +18,7 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
   private final List<HttpCallback> httpCallbacks = new ArrayList<HttpCallback>();
   private final List<TrackedHandle> httpHandles = new ArrayList<TrackedHandle>();
   private final List<URI> connectCalls = new ArrayList<URI>();
+  private final List<Map<String, String>> connectHeaders = new ArrayList<Map<String, String>>();
   private long connectTimeoutMillis;
   private SocketCallback socketCallback;
   private final List<SocketCallback> socketCallbacks = new ArrayList<SocketCallback>();
@@ -45,14 +48,20 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
   }
 
   @Override
-  public Cancellable connect(URI uri, long timeoutMillis, SocketCallback callback) {
+  public Cancellable connect(
+      URI uri, Map<String, String> headers, long timeoutMillis, SocketCallback callback) {
     connectCalls.add(uri);
+    connectHeaders.add(new LinkedHashMap<String, String>(headers));
     connectTimeoutMillis = timeoutMillis;
     socketCallback = callback;
     socketCallbacks.add(callback);
     TrackedHandle handle = new TrackedHandle(false);
     connectHandles.add(handle);
     return handle;
+  }
+
+  public List<Map<String, String>> connectHeaders() {
+    return new ArrayList<Map<String, String>>(connectHeaders);
   }
 
   @Override

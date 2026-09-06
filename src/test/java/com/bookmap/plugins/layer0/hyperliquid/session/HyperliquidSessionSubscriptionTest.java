@@ -7,6 +7,8 @@ import static org.junit.Assert.assertTrue;
 import com.bookmap.plugins.layer0.hyperliquid.FakeHyperliquidTransport;
 import com.bookmap.plugins.layer0.hyperliquid.HyperliquidConnector;
 import com.bookmap.plugins.layer0.hyperliquid.HyperliquidEnvironment;
+import com.bookmap.plugins.layer0.hyperliquid.MarketDataSource;
+import com.bookmap.plugins.layer0.hyperliquid.SourceProfile;
 import com.bookmap.plugins.layer0.hyperliquid.book.OrderBookSnapshotDiff;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget.SubscriptionPermit;
@@ -783,7 +785,7 @@ public class HyperliquidSessionSubscriptionTest {
     }
 
     void loginWithSymbols(int count) {
-      session.login(HyperliquidEnvironment.MAINNET);
+      session.login(SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
       drain();
       StringBuilder metadata = new StringBuilder("{\"universe\":[");
       for (int index = 0; index < count; index++) {

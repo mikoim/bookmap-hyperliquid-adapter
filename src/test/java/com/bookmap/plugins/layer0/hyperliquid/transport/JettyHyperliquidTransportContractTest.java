@@ -2,6 +2,7 @@ package com.bookmap.plugins.layer0.hyperliquid.transport;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
@@ -133,6 +134,23 @@ public class JettyHyperliquidTransportContractTest {
     assertEquals(Integer.valueOf(1001), closeCode.get());
     assertEquals("shutdown", closeReason.get());
     assertFalse(socket.isOpen());
+  }
+
+  /** Pins that profile headers reach the Jetty upgrade request verbatim. */
+  @Test
+  public void upgradeRequestCarriesEveryHandshakeHeader() {
+    java.util.Map<String, String> headers = new java.util.LinkedHashMap<String, String>();
+    headers.put("Origin", "https://hyperdash.com");
+    headers.put("User-Agent", "Mozilla/5.0 test");
+
+    org.eclipse.jetty.websocket.client.ClientUpgradeRequest request =
+        JettyHyperliquidTransport.upgradeRequest(headers);
+
+    assertEquals("https://hyperdash.com", request.getHeader("Origin"));
+    assertEquals("Mozilla/5.0 test", request.getHeader("User-Agent"));
+    assertNull(
+        JettyHyperliquidTransport.upgradeRequest(java.util.Collections.<String, String>emptyMap())
+            .getHeader("Origin"));
   }
 
   @Test

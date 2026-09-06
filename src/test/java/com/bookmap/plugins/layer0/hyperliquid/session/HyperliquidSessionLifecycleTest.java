@@ -7,6 +7,8 @@ import static org.junit.Assert.assertTrue;
 import com.bookmap.plugins.layer0.hyperliquid.FakeHyperliquidTransport;
 import com.bookmap.plugins.layer0.hyperliquid.HyperliquidConnector;
 import com.bookmap.plugins.layer0.hyperliquid.HyperliquidEnvironment;
+import com.bookmap.plugins.layer0.hyperliquid.MarketDataSource;
+import com.bookmap.plugins.layer0.hyperliquid.SourceProfile;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.CancellableScheduler;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.StateEventDispatcher;
@@ -708,7 +710,7 @@ public class HyperliquidSessionLifecycleTest {
     }
 
     private void startLogin() {
-      session.login(HyperliquidEnvironment.MAINNET);
+      session.login(SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
       drain();
     }
 

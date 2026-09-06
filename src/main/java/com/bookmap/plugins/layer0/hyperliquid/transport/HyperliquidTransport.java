@@ -1,6 +1,7 @@
 package com.bookmap.plugins.layer0.hyperliquid.transport;
 
 import java.net.URI;
+import java.util.Map;
 
 /** Asynchronous HTTP and WebSocket boundary used by the Hyperliquid connector. */
 public interface HyperliquidTransport extends AutoCloseable {
@@ -12,8 +13,9 @@ public interface HyperliquidTransport extends AutoCloseable {
   Cancellable postJson(
       URI uri, String contentType, String body, long timeoutMillis, HttpCallback callback);
 
-  /** Opens a WebSocket and reports its lifecycle. */
-  Cancellable connect(URI uri, long timeoutMillis, SocketCallback callback);
+  /** Opens a WebSocket with extra handshake headers and reports its lifecycle. */
+  Cancellable connect(
+      URI uri, Map<String, String> headers, long timeoutMillis, SocketCallback callback);
 
   /** Closes all transport resources. */
   @Override

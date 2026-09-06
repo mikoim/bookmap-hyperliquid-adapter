@@ -82,7 +82,7 @@ public final class Provider extends ExternalLiveBaseProvider {
 
   @Override
   public void login(LoginData loginData) {
-    session.login(environment(loginData));
+    session.login(SourceProfile.of(MarketDataSource.HYPERLIQUID, environment(loginData)));
   }
 
   @Override

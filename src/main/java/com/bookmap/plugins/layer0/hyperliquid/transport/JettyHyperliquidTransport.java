@@ -2,6 +2,7 @@ package com.bookmap.plugins.layer0.hyperliquid.transport;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -17,6 +18,7 @@ import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.websocket.api.RemoteEndpoint;
 import org.eclipse.jetty.websocket.api.Session;
 import org.eclipse.jetty.websocket.api.WriteCallback;
+import org.eclipse.jetty.websocket.client.ClientUpgradeRequest;
 import org.eclipse.jetty.websocket.client.WebSocketClient;
 
 /** Jetty 9.3 implementation of the asynchronous Hyperliquid transport boundary. */
@@ -64,12 +66,13 @@ public final class JettyHyperliquidTransport implements HyperliquidTransport {
   }
 
   @Override
-  public Cancellable connect(URI uri, long timeoutMillis, SocketCallback callback) {
+  public Cancellable connect(
+      URI uri, Map<String, String> headers, long timeoutMillis, SocketCallback callback) {
     webSocketClient.setConnectTimeout(timeoutMillis);
     final SocketAdapter adapter = new SocketAdapter(callback);
     final Future<Session> future;
     try {
-      future = webSocketClient.connect(adapter, uri);
+      future = webSocketClient.connect(adapter, uri, upgradeRequest(headers));
     } catch (Exception failure) {
       callback.onFailure(failure);
       return new Cancellable() {
@@ -86,6 +89,15 @@ public final class JettyHyperliquidTransport implements HyperliquidTransport {
         adapter.closeSession();
       }
     };
+  }
+
+  /** Builds the upgrade request carrying the supplied handshake headers verbatim. */
+  static ClientUpgradeRequest upgradeRequest(Map<String, String> headers) {
+    ClientUpgradeRequest request = new ClientUpgradeRequest();
+    for (Map.Entry<String, String> header : headers.entrySet()) {
+      request.setHeader(header.getKey(), header.getValue());
+    }
+    return request;
   }
 
   @Override

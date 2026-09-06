@@ -30,7 +30,8 @@ public class HyperliquidConnectorTest {
   public void startPostsMainnetMetadataBeforeOpeningTheWebSocket() {
     Fixture fixture = new Fixture();
 
-    fixture.connector.start(HyperliquidEnvironment.MAINNET);
+    fixture.connector.start(
+        SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
 
     assertEquals(URI.create("https://api.hyperliquid.xyz/info"), fixture.transport.httpUri());
     assertEquals("application/json", fixture.transport.contentType());
@@ -43,7 +44,8 @@ public class HyperliquidConnectorTest {
   public void validMetadataNotifiesListenerBeforeConnectingMainnetSocket() {
     Fixture fixture = new Fixture();
 
-    fixture.connector.start(HyperliquidEnvironment.MAINNET);
+    fixture.connector.start(
+        SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
     fixture.transport.completeMeta(200, validMeta("BTC"));
 
     assertEquals(Arrays.asList("BTC"), fixture.listener.instrumentNames);
@@ -56,7 +58,8 @@ public class HyperliquidConnectorTest {
   public void testnetUsesBothTestnetEndpoints() {
     Fixture fixture = new Fixture();
 
-    fixture.connector.start(HyperliquidEnvironment.TESTNET);
+    fixture.connector.start(
+        SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.TESTNET));
     fixture.transport.completeMeta(200, validMeta("ETH"));
 
     assertEquals(
@@ -70,7 +73,8 @@ public class HyperliquidConnectorTest {
   public void failedMetadataDoesNotConnect() {
     Fixture fixture = new Fixture();
 
-    fixture.connector.start(HyperliquidEnvironment.MAINNET);
+    fixture.connector.start(
+        SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
     fixture.transport.completeMeta(503, "unavailable");
 
     assertEquals(1, fixture.listener.initialFailures.size());
@@ -82,7 +86,8 @@ public class HyperliquidConnectorTest {
   public void invalidMetadataDoesNotConnect() {
     Fixture fixture = new Fixture();
 
-    fixture.connector.start(HyperliquidEnvironment.MAINNET);
+    fixture.connector.start(
+        SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
     fixture.transport.completeMeta(200, "{}");
 
     assertEquals(1, fixture.listener.initialFailures.size());
@@ -149,7 +154,8 @@ public class HyperliquidConnectorTest {
   public void closeCancelsOutstandingMetadataAndSuppressesLateCallback() {
     Fixture fixture = new Fixture();
 
-    fixture.connector.start(HyperliquidEnvironment.MAINNET);
+    fixture.connector.start(
+        SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
     fixture.connector.close();
     fixture.transport.completeMeta(200, validMeta("BTC"));
 
@@ -173,7 +179,8 @@ public class HyperliquidConnectorTest {
   public void initialHandshakeTimeoutFailsWithoutSchedulingReconnect() {
     Fixture fixture = new Fixture();
 
-    fixture.connector.start(HyperliquidEnvironment.MAINNET);
+    fixture.connector.start(
+        SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
     fixture.transport.completeMeta(200, validMeta("BTC"));
     fixture.clock.now = 10_000L;
     fixture.scheduler.advanceBy(10_000L);
@@ -218,7 +225,8 @@ public class HyperliquidConnectorTest {
   @Test
   public void closeCancelsConnectAndEveryOutstandingTimer() {
     Fixture fixture = new Fixture();
-    fixture.connector.start(HyperliquidEnvironment.MAINNET);
+    fixture.connector.start(
+        SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
     fixture.transport.completeMeta(200, validMeta("BTC"));
 
     fixture.connector.close();
@@ -245,7 +253,8 @@ public class HyperliquidConnectorTest {
     ConnectionPermit holder = budget.tryAcquireConnection(0L, 0).permit();
     Fixture fixture = new Fixture(budget);
 
-    fixture.connector.start(HyperliquidEnvironment.MAINNET);
+    fixture.connector.start(
+        SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
     fixture.transport.completeMeta(200, validMeta("BTC"));
     fixture.clock.now = 10_000L;
     fixture.scheduler.advanceBy(10_000L);
@@ -262,7 +271,8 @@ public class HyperliquidConnectorTest {
     earlierAttempt.close();
     Fixture fixture = new Fixture(budget);
 
-    fixture.connector.start(HyperliquidEnvironment.MAINNET);
+    fixture.connector.start(
+        SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
     fixture.transport.completeMeta(200, validMeta("BTC"));
     fixture.clock.now = 10_000L;
     fixture.scheduler.advanceBy(10_000L);
@@ -401,6 +411,35 @@ public class HyperliquidConnectorTest {
     assertEquals(-1L, fixture.scheduler.nextDelayMillis());
   }
 
+  /** Hyperdash relays the Mainnet book, so metadata stays on Mainnet even with testnet selected. */
+  @Test
+  public void hyperdashStartUsesMainnetMetadataAndSendsHandshakeHeaders() {
+    Fixture fixture = new Fixture();
+
+    fixture.connector.start(
+        SourceProfile.of(MarketDataSource.HYPERDASH, HyperliquidEnvironment.TESTNET));
+    fixture.transport.completeMeta(200, validMeta("BTC"));
+
+    assertEquals("https://api.hyperliquid.xyz/info", fixture.transport.httpUri().toString());
+    assertEquals(
+        "wss://api.hyperdash.com/ws/orderbook", fixture.transport.connectCalls().get(0).toString());
+    assertEquals("https://hyperdash.com", fixture.transport.connectHeaders().get(0).get("Origin"));
+    assertTrue(fixture.transport.connectHeaders().get(0).get("User-Agent").startsWith("Mozilla"));
+  }
+
+  /** Borsa needs no handshake headers. */
+  @Test
+  public void borsaStartConnectsWithoutHandshakeHeaders() {
+    Fixture fixture = new Fixture();
+
+    fixture.connector.start(
+        SourceProfile.of(MarketDataSource.BORSA, HyperliquidEnvironment.MAINNET));
+    fixture.transport.completeMeta(200, validMeta("BTC"));
+
+    assertEquals("wss://ws.borsa.cc/", fixture.transport.connectCalls().get(0).toString());
+    assertTrue(fixture.transport.connectHeaders().get(0).isEmpty());
+  }
+
   private static String validMeta(String coin) {
     return "{\"universe\":[{\"name\":\"" + coin + "\",\"szDecimals\":2}]}";
   }
@@ -438,7 +477,8 @@ public class HyperliquidConnectorTest {
     }
 
     private void startAndOpen() {
-      connector.start(HyperliquidEnvironment.MAINNET);
+      connector.start(
+          SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
       transport.completeMeta(200, validMeta("BTC"));
       transport.openSocket();
     }

@@ -1,8 +1,8 @@
 package com.bookmap.plugins.layer0.hyperliquid.session;
 
 import com.bookmap.plugins.layer0.hyperliquid.HyperliquidConnector;
-import com.bookmap.plugins.layer0.hyperliquid.HyperliquidEnvironment;
 import com.bookmap.plugins.layer0.hyperliquid.OutboundMessage;
+import com.bookmap.plugins.layer0.hyperliquid.SourceProfile;
 import com.bookmap.plugins.layer0.hyperliquid.book.OrderBookSnapshotDiff.SnapshotValidation;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget.Decision;
@@ -75,6 +75,7 @@ public final class HyperliquidSession
   private boolean generationInvalidated;
   private ConnectionState connectionState = ConnectionState.STARTING;
   private long currentGeneration = -1L;
+  private SourceProfile profile;
 
   /**
    * Creates a session using explicitly supplied connector, scheduling, and state-lane boundaries.
@@ -111,12 +112,12 @@ public final class HyperliquidSession
 
   /** Enqueues an asynchronous login command. */
   @Override
-  public void login(final HyperliquidEnvironment environment) {
+  public void login(final SourceProfile profile) {
     dispatcher.submitControl(
         new Runnable() {
           @Override
           public void run() {
-            handleLogin(environment);
+            handleLogin(profile);
           }
         });
   }
@@ -332,10 +333,11 @@ public final class HyperliquidSession
     }
   }
 
-  private void handleLogin(HyperliquidEnvironment environment) {
-    if (!closed && environment != null) {
+  private void handleLogin(SourceProfile newProfile) {
+    if (!closed && newProfile != null) {
+      profile = newProfile;
       connectionState = ConnectionState.STARTING;
-      connector.start(environment);
+      connector.start(newProfile);
     }
   }
 

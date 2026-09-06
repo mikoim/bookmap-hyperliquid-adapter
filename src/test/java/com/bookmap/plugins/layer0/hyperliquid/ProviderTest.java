@@ -49,13 +49,13 @@ public class ProviderTest {
 
     provider.login(
         new ExtendedLoginData(Collections.<String, CredentialsSerializationField>emptyMap()));
-    assertEquals(HyperliquidEnvironment.MAINNET, factory.session.lastLoginEnvironment);
+    assertEquals(HyperliquidEnvironment.MAINNET, factory.session.lastLoginProfile.environment());
     provider.login(new PlainLoginData());
-    assertEquals(HyperliquidEnvironment.MAINNET, factory.session.lastLoginEnvironment);
+    assertEquals(HyperliquidEnvironment.MAINNET, factory.session.lastLoginProfile.environment());
     provider.login(new ExtendedLoginData(Collections.singletonMap("testnet", field("true"))));
-    assertEquals(HyperliquidEnvironment.TESTNET, factory.session.lastLoginEnvironment);
+    assertEquals(HyperliquidEnvironment.TESTNET, factory.session.lastLoginProfile.environment());
     provider.login(new ExtendedLoginData(Collections.singletonMap("testnet", field("false"))));
-    assertEquals(HyperliquidEnvironment.MAINNET, factory.session.lastLoginEnvironment);
+    assertEquals(HyperliquidEnvironment.MAINNET, factory.session.lastLoginProfile.environment());
   }
 
   /** Prevents loss of the module metadata and perpetual-only feature configuration. */
@@ -238,13 +238,13 @@ public class ProviderTest {
   }
 
   private static final class FakeSession implements HyperliquidSessionApi {
-    private HyperliquidEnvironment lastLoginEnvironment;
+    private SourceProfile lastLoginProfile;
     private int commandCount;
 
     @Override
-    public void login(HyperliquidEnvironment environment) {
+    public void login(SourceProfile profile) {
       commandCount++;
-      lastLoginEnvironment = environment;
+      lastLoginProfile = profile;
     }
 
     @Override
