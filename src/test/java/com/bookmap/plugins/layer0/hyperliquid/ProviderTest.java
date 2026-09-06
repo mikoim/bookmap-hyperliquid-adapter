@@ -15,7 +15,9 @@ import com.bookmap.plugins.layer0.hyperliquid.session.SessionSink;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.junit.Test;
 import velox.api.layer0.annotations.Layer0CredentialsFieldsManager;
 import velox.api.layer0.annotations.Layer0LiveModule;
@@ -56,6 +58,34 @@ public class ProviderTest {
     assertEquals(HyperliquidEnvironment.TESTNET, factory.session.lastLoginProfile.environment());
     provider.login(new ExtendedLoginData(Collections.singletonMap("testnet", field("false"))));
     assertEquals(HyperliquidEnvironment.MAINNET, factory.session.lastLoginProfile.environment());
+  }
+
+  /** The dropdown picks the source; testnet only matters for Hyperliquid; unknown falls back. */
+  @Test
+  public void loginResolvesSourceFromDropdownAndFallsBackToHyperliquid() {
+    FakeSessionFactory factory = new FakeSessionFactory();
+    Provider provider = new Provider(factory);
+    Map<String, CredentialsSerializationField> fields =
+        new HashMap<String, CredentialsSerializationField>();
+
+    fields.put("source", field("Borsa"));
+    fields.put("testnet", field("true"));
+    provider.login(new ExtendedLoginData(fields));
+    assertEquals(MarketDataSource.BORSA, factory.session.lastLoginProfile.source());
+    assertEquals(HyperliquidEnvironment.MAINNET, factory.session.lastLoginProfile.environment());
+
+    fields.put("source", field("Hyperdash"));
+    provider.login(new ExtendedLoginData(fields));
+    assertEquals(MarketDataSource.HYPERDASH, factory.session.lastLoginProfile.source());
+
+    fields.put("source", field("something-else"));
+    provider.login(new ExtendedLoginData(fields));
+    assertEquals(MarketDataSource.HYPERLIQUID, factory.session.lastLoginProfile.source());
+    assertEquals(HyperliquidEnvironment.TESTNET, factory.session.lastLoginProfile.environment());
+
+    fields.remove("source");
+    provider.login(new ExtendedLoginData(fields));
+    assertEquals(MarketDataSource.HYPERLIQUID, factory.session.lastLoginProfile.source());
   }
 
   /** Prevents loss of the module metadata and perpetual-only feature configuration. */

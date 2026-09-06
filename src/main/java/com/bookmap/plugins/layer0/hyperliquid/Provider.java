@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
 import velox.api.layer0.annotations.Layer0CredentialsFieldsManager;
 import velox.api.layer0.annotations.Layer0LiveModule;
+import velox.api.layer0.credentialscomponents.CredentialsSerializationField;
 import velox.api.layer0.live.ExternalLiveBaseProvider;
 import velox.api.layer1.Layer1ApiAdminListener;
 import velox.api.layer1.Layer1ApiDataListener;
@@ -82,7 +83,7 @@ public final class Provider extends ExternalLiveBaseProvider {
 
   @Override
   public void login(LoginData loginData) {
-    session.login(SourceProfile.of(MarketDataSource.HYPERLIQUID, environment(loginData)));
+    session.login(profile(loginData));
   }
 
   @Override
@@ -169,19 +170,26 @@ public final class Provider extends ExternalLiveBaseProvider {
     }
   }
 
-  private static HyperliquidEnvironment environment(LoginData loginData) {
-    if (!(loginData instanceof ExtendedLoginData)) {
-      return HyperliquidEnvironment.MAINNET;
+  /** Resolves the source dropdown and testnet checkbox; missing or unknown values pick defaults. */
+  private static SourceProfile profile(LoginData loginData) {
+    Map<String, CredentialsSerializationField> fields = null;
+    if (loginData instanceof ExtendedLoginData) {
+      fields = ((ExtendedLoginData) loginData).extendedData;
     }
-    ExtendedLoginData extendedLoginData = (ExtendedLoginData) loginData;
-    if (extendedLoginData.extendedData == null) {
-      return HyperliquidEnvironment.MAINNET;
+    if (fields == null) {
+      return SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET);
     }
-    velox.api.layer0.credentialscomponents.CredentialsSerializationField field =
-        extendedLoginData.extendedData.get(HyperliquidFieldManager.TESTNET_FIELD);
-    return field != null && Boolean.parseBoolean(field.getStringValue())
-        ? HyperliquidEnvironment.TESTNET
-        : HyperliquidEnvironment.MAINNET;
+    MarketDataSource source =
+        MarketDataSource.fromFieldValue(
+            stringValue(fields.get(HyperliquidFieldManager.SOURCE_FIELD)));
+    boolean testnet =
+        Boolean.parseBoolean(stringValue(fields.get(HyperliquidFieldManager.TESTNET_FIELD)));
+    return SourceProfile.of(
+        source, testnet ? HyperliquidEnvironment.TESTNET : HyperliquidEnvironment.MAINNET);
+  }
+
+  private static String stringValue(CredentialsSerializationField field) {
+    return field == null ? null : field.getStringValue();
   }
 
   private final class ProviderSessionSink implements SessionSink {
