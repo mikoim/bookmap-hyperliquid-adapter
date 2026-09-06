@@ -8,14 +8,24 @@ public final class SubscriptionKey implements Comparable<SubscriptionKey> {
 
   private final String coin;
   private final SubscriptionType type;
+  private final L2BookParameters parameters;
 
-  /** Creates a subscription definition. */
+  /** Creates a subscription definition without optional parameters. */
   public SubscriptionKey(String coin, SubscriptionType type) {
+    this(coin, type, L2BookParameters.NONE);
+  }
+
+  /** Creates a subscription definition; parameters are only emitted for l2Book subscriptions. */
+  public SubscriptionKey(String coin, SubscriptionType type, L2BookParameters parameters) {
     if (coin == null || coin.isEmpty()) {
       throw new IllegalArgumentException("coin must be non-empty");
     }
+    if (parameters == null) {
+      throw new IllegalArgumentException("parameters must not be null");
+    }
     this.coin = coin;
     this.type = type;
+    this.parameters = parameters;
   }
 
   /** Returns the subscription's coin. */
@@ -68,6 +78,9 @@ public final class SubscriptionKey implements Comparable<SubscriptionKey> {
     JsonObject subscription = new JsonObject();
     subscription.addProperty("type", type.wireName());
     subscription.addProperty("coin", coin);
+    if (type == SubscriptionType.L2_BOOK) {
+      parameters.appendTo(subscription);
+    }
     JsonObject envelope = new JsonObject();
     envelope.addProperty("method", method);
     envelope.add("subscription", subscription);

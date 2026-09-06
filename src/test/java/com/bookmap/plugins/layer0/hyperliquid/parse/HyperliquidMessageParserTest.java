@@ -284,4 +284,34 @@ public class HyperliquidMessageParserTest {
       json.append("{\"px\":\"").append(price).append("\",\"sz\":\"1\",\"n\":1}");
     }
   }
+
+  /** Borsa deltas carry zero-size removals; the parser must pass them through. */
+  @Test
+  public void acceptsZeroSizeBookLevelsButRejectsNegativeSizes() {
+    ParsedFrame frame =
+        parser.parse(
+            "{\"channel\":\"l2Book\",\"data\":{\"coin\":\"BTC\",\"time\":42,\"levels\":["
+                + "[{\"px\":\"99\",\"sz\":\"0\"}],[{\"px\":\"101\",\"sz\":\"1\"}]]}}");
+
+    assertTrue(frame.diagnostics().isEmpty());
+    BookSnapshot snapshot = (BookSnapshot) frame.marketEvents().get(0);
+    assertEquals(0, snapshot.bids().get(0).size().signum());
+    assertInvalid(
+        l2BookWith("\"coin\":\"BTC\",\"time\":1,\"levels\":[[{\"px\":\"99\",\"sz\":\"-1\"}],[]]"));
+  }
+
+  /** Borsa and Hyperdash echo nLevels in the subscription acknowledgement. */
+  @Test
+  public void acceptsNLevelsInL2BookSubscriptionAck() {
+    ParsedFrame frame =
+        parser.parse(
+            "{\"channel\":\"subscriptionResponse\",\"data\":{"
+                + "\"method\":\"subscribe\",\"subscription\":{\"type\":\"l2Book\","
+                + "\"coin\":\"BTC\",\"nSigFigs\":5,\"nLevels\":20}}}");
+
+    assertEquals(1, frame.controlEvents().size());
+    assertEquals(
+        new SubscriptionKey("BTC", SubscriptionType.L2_BOOK),
+        frame.controlEvents().get(0).target());
+  }
 }

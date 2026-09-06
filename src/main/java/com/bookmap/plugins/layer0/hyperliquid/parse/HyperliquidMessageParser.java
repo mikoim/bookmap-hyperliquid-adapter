@@ -132,7 +132,7 @@ public final class HyperliquidMessageParser {
       levels.add(
           new BookLevel(
               requiredPositiveDecimalString(object, "px"),
-              requiredPositiveDecimalString(object, "sz")));
+              requiredNonNegativeDecimalString(object, "sz")));
     }
     return levels;
   }
@@ -217,7 +217,10 @@ public final class HyperliquidMessageParser {
       return true;
     }
     return "l2Book".equals(type)
-        && ("nSigFigs".equals(field) || "mantissa".equals(field) || "fast".equals(field));
+        && ("nSigFigs".equals(field)
+            || "nLevels".equals(field)
+            || "mantissa".equals(field)
+            || "fast".equals(field));
   }
 
   private String requiredString(JsonObject object, String field) throws ProtocolException {
@@ -247,6 +250,20 @@ public final class HyperliquidMessageParser {
       BigDecimal value = new BigDecimal(raw);
       if (value.signum() <= 0) {
         throw new ProtocolException(field + " must be positive");
+      }
+      return value;
+    } catch (NumberFormatException failure) {
+      throw new ProtocolException(field + " must be a decimal string", failure);
+    }
+  }
+
+  private BigDecimal requiredNonNegativeDecimalString(JsonObject object, String field)
+      throws ProtocolException {
+    String raw = requiredString(object, field);
+    try {
+      BigDecimal value = new BigDecimal(raw);
+      if (value.signum() < 0) {
+        throw new ProtocolException(field + " must be non-negative");
       }
       return value;
     } catch (NumberFormatException failure) {

@@ -129,4 +129,34 @@ public class SubscriptionKeyTest {
     assertEquals(first, second);
     assertEquals(first.hashCode(), second.hashCode());
   }
+
+  /** Optional parameters are emitted for l2Book only, and never affect key identity. */
+  @Test
+  public void appendsL2BookParametersWithoutChangingIdentity() {
+    L2BookParameters parameters = new L2BookParameters(Integer.valueOf(5), null, null);
+    SubscriptionKey key = new SubscriptionKey("BTC", SubscriptionType.L2_BOOK, parameters);
+
+    JsonObject actual = new JsonParser().parse(key.subscribeJson()).getAsJsonObject();
+    JsonObject expected =
+        new JsonParser()
+            .parse(
+                "{\"method\":\"subscribe\",\"subscription\":"
+                    + "{\"type\":\"l2Book\",\"coin\":\"BTC\",\"nSigFigs\":5}}")
+            .getAsJsonObject();
+    assertEquals(expected, actual);
+    assertEquals(new SubscriptionKey("BTC", SubscriptionType.L2_BOOK), key);
+    assertEquals(new SubscriptionKey("BTC", SubscriptionType.L2_BOOK).hashCode(), key.hashCode());
+    assertEquals(0, new SubscriptionKey("BTC", SubscriptionType.L2_BOOK).compareTo(key));
+  }
+
+  /** Trades subscriptions ignore l2Book parameters entirely. */
+  @Test
+  public void tradesIgnoreL2BookParameters() {
+    SubscriptionKey key =
+        new SubscriptionKey(
+            "BTC", SubscriptionType.TRADES, new L2BookParameters(Integer.valueOf(5), null, null));
+
+    assertEquals(
+        new SubscriptionKey("BTC", SubscriptionType.TRADES).subscribeJson(), key.subscribeJson());
+  }
 }
