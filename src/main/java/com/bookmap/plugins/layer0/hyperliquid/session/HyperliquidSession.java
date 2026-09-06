@@ -336,7 +336,9 @@ public final class HyperliquidSession
 
   private void handleLogin(SourceProfile newProfile) {
     if (!closed && newProfile != null) {
-      profile = newProfile;
+      if (profile == null) {
+        profile = newProfile;
+      }
       connectionState = ConnectionState.STARTING;
       connector.start(newProfile);
     }
@@ -536,6 +538,7 @@ public final class HyperliquidSession
       return;
     }
     if (snapshot.time() < record.lastAcceptedBookTime()) {
+      sink.onDiagnostic("discarded stale book delta for " + record.alias());
       return;
     }
     boolean live = record.state() == SubscriptionRecord.State.ACTIVE && !recoveringNow;

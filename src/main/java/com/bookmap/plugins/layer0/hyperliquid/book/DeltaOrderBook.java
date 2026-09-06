@@ -230,6 +230,11 @@ public final class DeltaOrderBook {
       if (level == null || level.size() == null) {
         throw new InvalidLevelException("Book level is missing");
       }
+      if (!keepZeroSizes && level.size().signum() == 0) {
+        // A zero-size level in a seed is simply absent; skip before price conversion so an
+        // unrepresentable price on an absent level does not fail the seed.
+        continue;
+      }
       final int price;
       try {
         price = instrument.toDepthPriceUnits(level.price());

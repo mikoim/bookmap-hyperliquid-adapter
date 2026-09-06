@@ -19,12 +19,14 @@ The adapter supports the exact read-only perpetual scope exposed by Hyperliquid'
 - Borsa sends one full seed per connection followed by per-level deltas; the adapter folds the
   deltas locally and replaces the published book on every reconnect. Hyperdash sends full
   snapshots like Hyperliquid and requires browser-style handshake headers, which the adapter
-  adds automatically. The adapter does not verify either relay against Hyperliquid itself.
+  adds automatically. Hyperdash is subscribed with `nSigFigs=5`, so its prices are aggregated to
+  five significant figures and its book is coarser than Hyperliquid's. The adapter does not
+  verify either relay against Hyperliquid itself.
 - Only `PERPETUAL` subscriptions are accepted; Spot, history, account data, credentials, orders,
   and gap filling are not implemented.
-- Each subscription uses one `l2Book` feed and one `trades` feed on a single WebSocket. Snapshots
-  are aggregate L2 data, with at most 20 levels per side. Trades received while disconnected can
-  be missed.
+- Each subscription uses one `l2Book` feed and one `trades` feed on a single WebSocket. Hyperliquid
+  and Hyperdash snapshots carry at most 20 levels per side; Borsa deltas may add levels outside
+  that window. Trades received while disconnected can be missed.
 - `pips = 10^-(6-szDecimals)` is a lossless Bookmap display quantum for this market-data-only
   adapter, not an asserted Hyperliquid order tick.
 - Metadata is validated as a complete universe before delisted instruments are filtered.
@@ -60,8 +62,9 @@ headroom for those consumers and for Hyperliquid's external limits.
 
 The adapter uses per-side 20-level aggregate snapshots. During a disconnect, reconnect and full
 resynchronization are attempted, but no historical gap fill is available and trades may be missed.
-Borsa deltas are not self-healing after a dropped frame; the adapter reconnects and resynchronizes
-from a fresh seed instead.
+Borsa deltas are not self-healing: a delta dropped as stale or invalid leaves the published book
+out of sync until the next reconnect, and a market-data queue overflow forces that reconnect so a
+fresh seed replaces the book.
 
 ## Quality checks
 

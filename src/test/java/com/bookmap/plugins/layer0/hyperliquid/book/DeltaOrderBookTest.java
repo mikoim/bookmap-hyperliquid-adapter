@@ -101,6 +101,17 @@ public class DeltaOrderBookTest {
   }
 
   @Test
+  public void seedSkipsZeroSizeLevelWithUnrepresentablePriceBeforeConversion() {
+    DeltaOrderBook.Result seed =
+        book.applySeed(
+            snapshot(1L, levels(level("99999999999", "0"), level("100", "1")), levels()));
+
+    assertEquals(DeltaOrderBook.Status.APPLIED, seed.status());
+    assertTrue(book.seeded());
+    assertEquals(Collections.singletonList(depth(true, 100000000, 1)), book.publishStaged());
+  }
+
+  @Test
   public void resetForgetsEverythingWithoutUpdates() {
     book.applySeed(snapshot(1L, levels(level("100", "1")), levels()));
     book.publishStaged();

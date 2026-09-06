@@ -135,11 +135,6 @@ public final class SubscriptionRecord {
     return lastAcceptedBookTime;
   }
 
-  /** Returns the latest valid candidate awaiting activation. */
-  public NormalizedBookSnapshot pendingBook() {
-    return pendingBook;
-  }
-
   /** Updates the candidate and its monotonic timestamp while pending. */
   public void acceptPendingBook(NormalizedBookSnapshot book) {
     pendingBook = book;

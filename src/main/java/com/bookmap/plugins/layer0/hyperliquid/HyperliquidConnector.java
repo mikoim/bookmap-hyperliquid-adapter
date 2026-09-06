@@ -462,7 +462,7 @@ public final class HyperliquidConnector implements AutoCloseable {
     connectRequest = null;
     listener.onSocketOpened(openingGeneration);
     if (!openingInitial) {
-      for (SubscriptionKey key : desired.keySet()) {
+      for (SubscriptionKey key : desired.values()) {
         sendWhenPossible(
             new OutboundMessage(OutboundMessage.Kind.SUBSCRIBE, key, key.subscribeJson()),
             openingGeneration,
@@ -473,7 +473,7 @@ public final class HyperliquidConnector implements AutoCloseable {
         reconnectAttempt = 0;
       }
     } else {
-      for (SubscriptionKey key : desired.keySet()) {
+      for (SubscriptionKey key : desired.values()) {
         sendWhenPossible(
             new OutboundMessage(OutboundMessage.Kind.SUBSCRIBE, key, key.subscribeJson()),
             openingGeneration,

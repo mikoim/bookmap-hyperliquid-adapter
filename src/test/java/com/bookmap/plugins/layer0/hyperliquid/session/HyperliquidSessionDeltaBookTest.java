@@ -79,7 +79,38 @@ public class HyperliquidSessionDeltaBookTest {
     fixture.receive(book("BTC", 2L, bids(level("999.000", "0")), asks()));
     fixture.drain();
 
-    assertTrue(fixture.sink.events().isEmpty());
+    assertEquals(
+        Collections.singletonList("diagnostic:discarded stale book delta for BTC"),
+        fixture.sink.events());
+  }
+
+  @Test
+  public void overflowReconnectResynchronizesFromAFreshSeed() {
+    Fixture fixture = new Fixture();
+    fixture.activateBtc();
+    int connectCallsBefore = fixture.transport.connectCalls().size();
+
+    fixture.session.onMarketOverflow();
+    fixture.drain();
+    fixture.clock.now += 1_000L;
+    fixture.scheduler.advanceBy(1_000L);
+    fixture.drain();
+    fixture.transport.openSocket();
+    fixture.generation = 2L;
+    fixture.drain();
+    fixture.completeSends(2);
+
+    fixture.receive(ack(SubscriptionType.L2_BOOK));
+    fixture.receive(ack(SubscriptionType.TRADES));
+    fixture.drain();
+
+    fixture.receive(book("BTC", 2L, bids(level("101.000", "2")), asks()));
+    fixture.drain();
+
+    assertEquals(connectCallsBefore + 1, fixture.transport.connectCalls().size());
+    assertTrue(fixture.sink.events().contains("depth:BTC:1000000:0"));
+    assertTrue(fixture.sink.events().contains("depth:BTC:1010000:200"));
+    assertEquals(1, Collections.frequency(fixture.sink.events(), "connection-restored"));
   }
 
   @Test
