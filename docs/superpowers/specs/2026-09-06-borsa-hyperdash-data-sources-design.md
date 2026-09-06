@@ -55,8 +55,11 @@ Context7 上に存在しない。上表は実観測に基づく。
   | フィードモード | SNAPSHOT(毎回全量) | SEED_THEN_DELTA(初回全量→差分) | SNAPSHOT |
   | trades | 購読 | 購読 | 購読 |
 
-- **メタデータは常に Hyperliquid Mainnet REST**(`HyperliquidEnvironment.MAINNET.infoUri()`)から読む。
-  両ミラーが中継するのは Mainnet の板であるため。コネクタ内の「メタデータ URI = 環境固定」の結合を分離する。
+- メタデータの取得先はソースに従う: **Hyperliquid 選択時は選択された環境の REST(Testnet 選択時は testnet の
+  infoUri、既存挙動を維持。退行させない)**。**Borsa/Hyperdash 選択時は常に Hyperliquid Mainnet REST**
+  (`HyperliquidEnvironment.MAINNET.infoUri()`)。両ミラーが中継するのは Mainnet の板であるため。
+  コネクタ内の「メタデータ URI = 環境固定」の結合を分離し、WS エンドポイントとメタデータ URI を
+  個別に渡せるようにする。
 
 ### 選択 UI
 
@@ -79,11 +82,29 @@ Context7 上に存在しない。上表は実観測に基づく。
    l2Book レベルの `sz` 検証を「非負(0 許容)」に緩和。
 7. **板の新規差分経路** — パーサーは l2Book フレームを従来どおり `BookSnapshot`(レベル列)として生成する
    (`sz=0` も受理)。**シード/差分の区別はワイヤ形式では判別不能なため、セッション側で行う**:
-   SEED_THEN_DELTA モードの `SubscriptionRecord` は「現世代の初回フレーム受信済みか」のフラグを持ち、
-   初回フレームは全量シード(置換)として、2 回目以降は増分差分として処理する。
-   SNAPSHOT モードのレコードは現行 `OrderBookSnapshotDiff` 経路のまま。
-8. 各 `SubscriptionRecord` — Borsa モードのみ「発行済み価格集合」を保持し、
-   新しい世代のシード受信時に、新シードに含まれない旧レベルを `DepthUpdate size=0` として除去する。
+   SEED_THEN_DELTA モードの `SubscriptionRecord` は「現世代の初回フレーム受信済みか」のフラグと
+   **世代別のステージド板**(シードに差分を畳み込んだ作業中の板状態)を持つ。
+   SNAPSHOT モードのレコードは現行 `OrderBookSnapshotDiff` 経路のまま変更しない。
+
+   SEED_THEN_DELTA モードのフレーム処理(状態別、現行の PENDING_BOOK/回復/ACTIVE 経路と整合):
+   - **現世代の初回フレーム**(シード): ステージド板を新規作成し全レベルを載せる。
+     タイムスタンプの古さ評価は行わず無条件に受理し、`lastAcceptedBookTime` をシード時刻に更新する
+     (差分モードには SNAPSHOT のような「次の全量フレームによる自然回復」がなく、世代間の時刻逆行は
+     リレー再起動等で現実に起こるため、シードは世代の権威として常に受理する)。
+   - **2 回目以降のフレーム**(差分): 直近受理時刻より古いフレームは破棄(等号は許容)。
+     受理した差分は、
+     - まだアクティベーション前(PENDING_BOOK)ならステージド板に畳み込むのみで発行しない
+       (シード後・両 ACK 揃う前の差分を全量と誤認して発行する欠落を防ぐ)。
+     - 回復中ならステージド板に畳み込むのみで発行しない(回復完了時にまとめて全量置換するため)。
+     - アクティブかつ非回復なら 1 レベルずつその場で `DepthUpdate` へ変換して発行する
+       (`sz>0` 更新、`sz=0` 除去)。
+   - **アクティベーション**(SNAPSHOT モードの `activateIfReady` 相当): ステージド板の全レベルを
+     `DepthUpdate` として発行し、発行済み価格集合を初期化する。
+   - **回復完了時**(SNAPSHOT モードの `maybeRestore` 相当): ステージド板と発行済み価格集合を突き合わせ、
+     新シードに含まれない旧レベルは `DepthUpdate size=0` で除去、差異のあるレベルは更新として発行する。
+8. 各 `SubscriptionRecord` — Borsa モードのみ「発行済み価格集合」を保持し、世代境界で上記の
+   置換・除去ルールを適用する。SNAPSHOT モードには既存の `OrderBookSnapshotDiff` ベースラインがあり
+   追加状態は不要。
 
 ## データフロー
 
@@ -93,7 +114,7 @@ Context7 上に存在しない。上表は実観測に基づく。
 Provider.login(LoginData)
   └─ ドロップダウン + testnet チェックボックス → SourceProfile 解決(不明値は Hyperliquid)
        └─ session.login(SourceProfile)
-            └─ Connector: メタデータ REST(Mainnet info)POST {"type":"meta"} → 銘柄ユニバース確立
+            └─ Connector: メタデータ REST(Borsa/Hyperdash 選択時は Mainnet info、Hyperliquid 選択時は選択環境の info)POST {"type":"meta"} → 銘柄ユニバース確立
                  └─ WS open(SourceProfile の URI + ヘッダー; Jetty ClientUpgradeRequest)
                       └─ l2Book + trades 購読送信(プロファイルのパラメータ付き JSON)
                            └─ ACK(coin+type 照合、現行まま)→ アクティベーション
@@ -111,9 +132,11 @@ Provider.login(LoginData)
 
 - 現行の世代(generation)再購読リプレイ機構をそのまま使用。
 - 新規世代の初回 l2Book フレームは必ずシードとして扱い、旧世代発行済みの残存レベルは全除去。
-- タイムスタンプ単調性チェックはモード別: SNAPSHOT は現行の厳密増加(新しいフレームのみ受理)。
-  SEED_THEN_DELTA は Borsa がシードと直後の差分に**同一タイムスタンプ**を付けることを実測で確認済みのため、
-  同世代内では `time >= lastAcceptedBookTime`(等しい時刻を許容)で判定する。
+- タイムスタンプの鮮度判定は現行コードが既に `time < lastAcceptedBookTime` のみを STALE として棄却し
+  等号を受理する(`OrderBookSnapshotDiff.validate` / `acceptRecoveryBook` 実測)。この規則は全ソース共通で変更しない。
+  Borsa がシードと直後の差分に**同一タイムスタンプ**を付けること(実測済み)とも整合する。
+  SEED_THEN_DELTA でのみ追加が必要な規則は「**世代初回フレーム(シード)は鮮度判定を挟まず常に受理し、
+  `lastAcceptedBookTime` をシード時刻に再設定する**」こと(既述の項目7)。
 
 ### trades
 
