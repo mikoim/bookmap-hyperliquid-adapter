@@ -16,6 +16,7 @@ import com.bookmap.plugins.layer0.hyperliquid.concurrent.CancellableScheduler;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.StateEventDispatcher;
 import com.bookmap.plugins.layer0.hyperliquid.model.BookLevel;
 import com.bookmap.plugins.layer0.hyperliquid.model.BookSnapshot;
+import com.bookmap.plugins.layer0.hyperliquid.model.L2BookParameters;
 import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionKey;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionType;
@@ -331,7 +332,14 @@ public class HyperliquidSessionSubscriptionTest {
     PerpetualInstrument instrument = new PerpetualInstrument("BTC", 2);
     HyperliquidProcessBudget budget = budget();
     SubscriptionPermit permit = budget.tryReserveSubscriptionPair(0L).permit();
-    SubscriptionRecord record = new SubscriptionRecord("BTC", instrument, permit, 10_000L);
+    SubscriptionRecord record =
+        new SubscriptionRecord(
+            "BTC",
+            instrument,
+            permit,
+            10_000L,
+            SourceProfile.FeedMode.SNAPSHOT,
+            L2BookParameters.NONE);
     record.transitionToActive();
     record.beginGeneration(7L);
     OrderBookSnapshotDiff source = new OrderBookSnapshotDiff(instrument);

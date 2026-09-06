@@ -3,6 +3,7 @@ package com.bookmap.plugins.layer0.hyperliquid.session;
 import com.bookmap.plugins.layer0.hyperliquid.HyperliquidConnector;
 import com.bookmap.plugins.layer0.hyperliquid.OutboundMessage;
 import com.bookmap.plugins.layer0.hyperliquid.SourceProfile;
+import com.bookmap.plugins.layer0.hyperliquid.book.DeltaOrderBook;
 import com.bookmap.plugins.layer0.hyperliquid.book.OrderBookSnapshotDiff.SnapshotValidation;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget.Decision;
@@ -366,7 +367,13 @@ public final class HyperliquidSession
       return;
     }
     final SubscriptionRecord record =
-        new SubscriptionRecord(symbol, instrument, decision.permit(), activationDeadlineMillis);
+        new SubscriptionRecord(
+            symbol,
+            instrument,
+            decision.permit(),
+            activationDeadlineMillis,
+            profile.feedMode(),
+            profile.l2BookParameters());
     records.put(symbol, record);
     record.setActivationTask(
         scheduler.schedule(
@@ -480,6 +487,10 @@ public final class HyperliquidSession
       sink.onDiagnostic("discarded book for unsubscribed coin: " + snapshot.coin());
       return;
     }
+    if (record.feedMode() == SourceProfile.FeedMode.SEED_THEN_DELTA) {
+      handleDeltaBook(record, snapshot);
+      return;
+    }
     SnapshotValidation validation = record.diff().validate(snapshot, record.lastAcceptedBookTime());
     if (validation.status() == SnapshotValidation.Status.UNSUPPORTED_PRICE) {
       removeRecord(
@@ -502,6 +513,56 @@ public final class HyperliquidSession
     }
     publishDepth(record, record.diff().apply(validation.snapshot(), record.takeForceFullResync()));
     record.acceptActiveBook(validation.snapshot().time());
+  }
+
+  /**
+   * Seed-then-delta path. The first frame of a generation is the seed and is always accepted; later
+   * frames are deltas that must not be older than the last accepted frame.
+   */
+  private void handleDeltaBook(SubscriptionRecord record, BookSnapshot snapshot) {
+    DeltaOrderBook book = record.deltaBook();
+    boolean recoveringNow = recovering && connectionState == ConnectionState.RECONNECTING;
+    if (!book.seeded()) {
+      DeltaOrderBook.Result seed = book.applySeed(snapshot);
+      if (!acceptDeltaResult(record, seed)) {
+        return;
+      }
+      record.acceptActiveBook(snapshot.time());
+      if (record.state() == SubscriptionRecord.State.PENDING_BOOK) {
+        activateIfReady(record);
+      } else if (!recoveringNow) {
+        publishDepth(record, book.replacePublished());
+      }
+      return;
+    }
+    if (snapshot.time() < record.lastAcceptedBookTime()) {
+      return;
+    }
+    boolean live = record.state() == SubscriptionRecord.State.ACTIVE && !recoveringNow;
+    DeltaOrderBook.Result delta = book.applyDelta(snapshot, live);
+    if (!acceptDeltaResult(record, delta)) {
+      return;
+    }
+    record.acceptActiveBook(snapshot.time());
+    if (live) {
+      publishDepth(record, delta.updates());
+    }
+  }
+
+  private boolean acceptDeltaResult(SubscriptionRecord record, DeltaOrderBook.Result result) {
+    if (result.status() == DeltaOrderBook.Status.UNSUPPORTED_PRICE) {
+      removeRecord(
+          record.alias(),
+          RemovalCause.UNSUPPORTED_PRICE,
+          "Hyperliquid book price is unsupported: " + result.diagnostic());
+      return false;
+    }
+    if (result.status() != DeltaOrderBook.Status.APPLIED) {
+      sink.onDiagnostic(
+          "discarded invalid book for " + record.alias() + ": " + result.diagnostic());
+      return false;
+    }
+    return true;
   }
 
   private void handleTrade(TradeEvent trade) {
@@ -556,14 +617,18 @@ public final class HyperliquidSession
     if (record.state() != SubscriptionRecord.State.PENDING_BOOK
         || !record.hasAcknowledgement(SubscriptionType.L2_BOOK)
         || !record.hasAcknowledgement(SubscriptionType.TRADES)
-        || record.pendingBook() == null
+        || !record.hasActivationBook()
         || connectionState == ConnectionState.RECONNECTING
         || clock.getAsLong() >= record.activationDeadlineMillis()) {
       return;
     }
     record.transitionToActive();
     sink.onInstrumentAdded(record.instrument());
-    publishDepth(record, record.diff().apply(record.takePendingBook(), false));
+    if (record.feedMode() == SourceProfile.FeedMode.SEED_THEN_DELTA) {
+      publishDepth(record, record.deltaBook().publishStaged());
+    } else {
+      publishDepth(record, record.diff().apply(record.takePendingBook(), false));
+    }
     ArrayDeque<PendingTrade> pending = record.takePendingTrades();
     while (!pending.isEmpty()) {
       publishIfNew(record, pending.removeFirst());
@@ -604,7 +669,7 @@ public final class HyperliquidSession
             || cause == RemovalCause.REJECTION
             || cause == RemovalCause.FATAL
             || cause == RemovalCause.CLOSE)) {
-      publishDepth(record, record.diff().clear());
+      publishDepth(record, record.clearPublishedBook());
     }
     cancelAcknowledgement(record.l2BookKey());
     cancelAcknowledgement(record.tradesKey());
@@ -729,12 +794,18 @@ public final class HyperliquidSession
     lossNotifiedForIncident = false;
     for (SubscriptionRecord record : records.values()) {
       if (record.state() == SubscriptionRecord.State.ACTIVE) {
-        com.bookmap.plugins.layer0.hyperliquid.book.OrderBookSnapshotDiff.NormalizedBookSnapshot
-            book = record.takeRecoveryBook(generation);
-        if (book != null) {
-          publishDepth(record, record.diff().apply(book, true));
-          record.acceptActiveBook(book.time());
-          record.takeForceFullResync();
+        if (record.feedMode() == SourceProfile.FeedMode.SEED_THEN_DELTA) {
+          if (record.deltaBook().seeded()) {
+            publishDepth(record, record.deltaBook().replacePublished());
+          }
+        } else {
+          com.bookmap.plugins.layer0.hyperliquid.book.OrderBookSnapshotDiff.NormalizedBookSnapshot
+              book = record.takeRecoveryBook(generation);
+          if (book != null) {
+            publishDepth(record, record.diff().apply(book, true));
+            record.acceptActiveBook(book.time());
+            record.takeForceFullResync();
+          }
         }
         ArrayDeque<PendingTrade> pending = record.takePendingTrades();
         while (!pending.isEmpty()) {

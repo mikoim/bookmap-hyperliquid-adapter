@@ -1,9 +1,13 @@
 package com.bookmap.plugins.layer0.hyperliquid.session;
 
+import com.bookmap.plugins.layer0.hyperliquid.SourceProfile;
+import com.bookmap.plugins.layer0.hyperliquid.book.DeltaOrderBook;
 import com.bookmap.plugins.layer0.hyperliquid.book.OrderBookSnapshotDiff;
 import com.bookmap.plugins.layer0.hyperliquid.book.OrderBookSnapshotDiff.NormalizedBookSnapshot;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget.SubscriptionPermit;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.CancellableScheduler;
+import com.bookmap.plugins.layer0.hyperliquid.model.DepthUpdate;
+import com.bookmap.plugins.layer0.hyperliquid.model.L2BookParameters;
 import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionKey;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionType;
@@ -11,6 +15,7 @@ import com.bookmap.plugins.layer0.hyperliquid.model.TradeKey;
 import java.util.ArrayDeque;
 import java.util.EnumSet;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /** Mutable state owned by one alias while it waits for or receives market data. */
@@ -32,6 +37,8 @@ public final class SubscriptionRecord {
   private final SubscriptionKey tradesKey;
   private final long activationDeadlineMillis;
   private final OrderBookSnapshotDiff diff;
+  private final SourceProfile.FeedMode feedMode;
+  private final DeltaOrderBook deltaBook;
   private final ArrayDeque<PendingTrade> pendingTrades = new ArrayDeque<PendingTrade>();
   private final Set<TradeKey> pendingTradeKeys = new HashSet<TradeKey>();
   private final EnumSet<SubscriptionType> sent = EnumSet.noneOf(SubscriptionType.class);
@@ -52,14 +59,40 @@ public final class SubscriptionRecord {
       String alias,
       PerpetualInstrument instrument,
       SubscriptionPermit permit,
-      long activationDeadlineMillis) {
+      long activationDeadlineMillis,
+      SourceProfile.FeedMode feedMode,
+      L2BookParameters l2BookParameters) {
     this.alias = alias;
     this.instrument = instrument;
     this.permit = permit;
     this.activationDeadlineMillis = activationDeadlineMillis;
-    l2BookKey = new SubscriptionKey(instrument.symbol(), SubscriptionType.L2_BOOK);
+    this.feedMode = feedMode;
+    l2BookKey =
+        new SubscriptionKey(instrument.symbol(), SubscriptionType.L2_BOOK, l2BookParameters);
     tradesKey = new SubscriptionKey(instrument.symbol(), SubscriptionType.TRADES);
     diff = new OrderBookSnapshotDiff(instrument);
+    deltaBook =
+        feedMode == SourceProfile.FeedMode.SEED_THEN_DELTA ? new DeltaOrderBook(instrument) : null;
+  }
+
+  /** Returns how this alias's source delivers l2Book frames. */
+  public SourceProfile.FeedMode feedMode() {
+    return feedMode;
+  }
+
+  /** Returns the seed-then-delta book, or null in snapshot mode. */
+  public DeltaOrderBook deltaBook() {
+    return deltaBook;
+  }
+
+  /** Returns whether a current-generation book is available for activation. */
+  public boolean hasActivationBook() {
+    return deltaBook == null ? pendingBook != null : deltaBook.seeded();
+  }
+
+  /** Deletes every published level of this alias, whichever book mode it uses. */
+  public List<DepthUpdate> clearPublishedBook() {
+    return deltaBook == null ? diff.clear() : deltaBook.clearPublished();
   }
 
   /** Returns the Bookmap alias for this record. */
@@ -211,6 +244,9 @@ public final class SubscriptionRecord {
     sent.clear();
     acknowledgements.clear();
     clearRecoveryBook();
+    if (deltaBook != null) {
+      deltaBook.beginGeneration();
+    }
   }
 
   /** Stores a converted pending trade when its bounded queue has room. */
@@ -289,6 +325,9 @@ public final class SubscriptionRecord {
     lastAcceptedBookTime = -1L;
     forceFullResync = false;
     diff.reset();
+    if (deltaBook != null) {
+      deltaBook.reset();
+    }
     permit.close();
   }
 
