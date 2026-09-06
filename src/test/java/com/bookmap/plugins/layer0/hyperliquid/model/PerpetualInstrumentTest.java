@@ -2,6 +2,7 @@ package com.bookmap.plugins.layer0.hyperliquid.model;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import com.bookmap.plugins.layer0.hyperliquid.HyperliquidEnvironment;
 import java.math.BigDecimal;
@@ -60,6 +61,22 @@ public class PerpetualInstrumentTest {
     PerpetualInstrument instrument = new PerpetualInstrument("BTC", 3);
 
     assertEquals(Integer.MAX_VALUE, instrument.toSizeUnits(new BigDecimal("9999999999.999")));
+  }
+
+  /** Depth sizes accept zero for removals while trade sizes keep rejecting it. */
+  @Test
+  public void depthSizeUnitsAcceptZero() throws ValueConversionException {
+    PerpetualInstrument instrument = new PerpetualInstrument("BTC", 2);
+
+    assertEquals(0, instrument.toDepthSizeUnits(new BigDecimal("0")));
+    assertEquals(0, instrument.toDepthSizeUnits(new BigDecimal("0.00")));
+    assertEquals(150, instrument.toDepthSizeUnits(new BigDecimal("1.5")));
+    try {
+      instrument.toSizeUnits(new BigDecimal("0"));
+      fail("trade size zero must stay rejected");
+    } catch (ValueConversionException expected) {
+      assertEquals(ValueConversionException.Reason.NON_POSITIVE, expected.reason());
+    }
   }
 
   /** Rejects a depth price that needs one unit more than a signed integer can hold. */

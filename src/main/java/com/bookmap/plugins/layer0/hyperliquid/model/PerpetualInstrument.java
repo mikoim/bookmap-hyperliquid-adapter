@@ -86,6 +86,14 @@ public final class PerpetualInstrument {
     return units.intValue();
   }
 
+  /** Converts a depth size to Bookmap units; zero means the level is gone. */
+  public int toDepthSizeUnits(BigDecimal size) throws ValueConversionException {
+    if (size != null && size.signum() == 0) {
+      return 0;
+    }
+    return toSizeUnits(size);
+  }
+
   private BigInteger exactUnits(BigDecimal value, int decimals) throws ValueConversionException {
     if (value == null || value.signum() <= 0) {
       throw new ValueConversionException(ValueConversionException.Reason.NON_POSITIVE);

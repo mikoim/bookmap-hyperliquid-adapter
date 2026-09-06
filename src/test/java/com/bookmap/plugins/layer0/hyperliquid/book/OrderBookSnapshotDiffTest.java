@@ -102,7 +102,7 @@ public class OrderBookSnapshotDiffTest {
   public void rejectsZeroNegativeAndNonIntegralSizesWithoutChangingTheBaseline() {
     diff.apply(valid(snapshot(10, bids(level("100", "1")), asks())), false);
 
-    assertInvalidSize("0");
+    // Negative and non-integral sizes are rejected and don't change the baseline.
     assertInvalidSize("-1");
     assertInvalidSize("1.5");
     assertEquals(
@@ -120,6 +120,20 @@ public class OrderBookSnapshotDiffTest {
     assertEquals(
         Collections.<DepthUpdate>emptyList(),
         diff.apply(valid(snapshot(12, bids(level("100", "1")), asks())), false));
+  }
+
+  /** A zero-size level in a full snapshot means the level is absent. */
+  @Test
+  public void treatsZeroSizeSnapshotLevelsAsAbsent() {
+    List<DepthUpdate> initial =
+        diff.apply(
+            valid(snapshot(10, bids(level("100", "1"), level("99", "0")), asks(level("101", "0")))),
+            false);
+    assertEquals(Collections.singletonList(depth(true, 100000000, 1)), initial);
+
+    List<DepthUpdate> next =
+        diff.apply(valid(snapshot(11, bids(level("100", "0")), asks(level("101", "2")))), false);
+    assertEquals(Arrays.asList(depth(true, 100000000, 0), depth(false, 101000000, 2)), next);
   }
 
   @Test

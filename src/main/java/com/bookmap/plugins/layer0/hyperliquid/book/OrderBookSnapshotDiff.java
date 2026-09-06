@@ -104,6 +104,10 @@ public final class OrderBookSnapshotDiff {
       if (level == null) {
         throw new InvalidSnapshotException("Book level is missing");
       }
+      if (level.size() != null && level.size().signum() == 0) {
+        // A zero-size level in a complete snapshot is simply absent.
+        continue;
+      }
       final int price;
       try {
         price = instrument.toDepthPriceUnits(level.price());
