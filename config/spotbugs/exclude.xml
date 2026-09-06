@@ -25,4 +25,12 @@
     <Class name="com.bookmap.plugins.layer0.hyperliquid.session.SubscriptionRecord"/>
     <Bug pattern="EI_EXPOSE_REP"/>
   </Match>
+  <Match>
+    <Class name="com.bookmap.plugins.layer0.hyperliquid.SourceProfile"/>
+    <Bug pattern="EI_EXPOSE_REP"/>
+  </Match>
+  <Match>
+    <Class name="com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionKey"/>
+    <Bug pattern="EI_EXPOSE_REP2"/>
+  </Match>
 </FindBugsFilter>

@@ -436,6 +436,82 @@ public class ProviderEndToEndTest {
     second.assertClosed();
   }
 
+  @Test
+  public void borsaLoginUsesMainnetMetadataAndPublishesSeedThenDelta() {
+    Fixture fixture = new Fixture(budget(4, 20, 20, 4));
+    fixture.loginWithSource("Borsa", true);
+    fixture.subscribe("BTC");
+    fixture.completeSends();
+
+    assertEquals("https://api.hyperliquid.xyz/info", fixture.transport.httpUri().toString());
+    assertEquals("wss://ws.borsa.cc/", fixture.transport.connectCalls().get(0).toString());
+    assertTrue(fixture.transport.connectHeaders().get(0).isEmpty());
+    assertTrue(
+        fixture
+            .transport
+            .socket()
+            .successfulSendBodies()
+            .contains(
+                "{\"method\":\"subscribe\",\"subscription\":"
+                    + "{\"type\":\"l2Book\",\"coin\":\"BTC\"}}"));
+
+    fixture.ack("BTC", "l2Book");
+    fixture.ack("BTC", "trades");
+    fixture.frame(
+        "{\"channel\":\"l2Book\",\"data\":{\"coin\":\"BTC\",\"time\":1,\"levels\":["
+            + "[{\"px\":\"100\",\"sz\":\"1\",\"n\":1}],[{\"px\":\"101\",\"sz\":\"2\",\"n\":1}]]}}");
+    fixture.frame(
+        "{\"channel\":\"l2Book\",\"data\":{\"coin\":\"BTC\",\"time\":1,\"levels\":["
+            + "[{\"px\":\"100\",\"sz\":\"0\",\"n\":0}],[{\"px\":\"102\",\"sz\":\"3\",\"n\":1}]]}}");
+    fixture.drain();
+
+    assertEquals(
+        Arrays.asList(
+            "login",
+            "added:BTC",
+            "depth:BTC:1000000:100",
+            "depth:BTC:1010000:200",
+            "depth:BTC:1000000:0",
+            "depth:BTC:1020000:300"),
+        fixture.trace);
+    fixture.closeTwice();
+    fixture.assertClosed();
+  }
+
+  @Test
+  public void hyperdashLoginSendsHandshakeHeadersAndNSigFigsAndAcceptsEchoedAck() {
+    Fixture fixture = new Fixture(budget(4, 20, 20, 4));
+    fixture.loginWithSource("Hyperdash", false);
+    fixture.subscribe("BTC");
+    fixture.completeSends();
+
+    assertEquals(
+        "wss://api.hyperdash.com/ws/orderbook", fixture.transport.connectCalls().get(0).toString());
+    assertEquals("https://hyperdash.com", fixture.transport.connectHeaders().get(0).get("Origin"));
+    assertTrue(fixture.transport.connectHeaders().get(0).containsKey("User-Agent"));
+    assertTrue(
+        fixture
+            .transport
+            .socket()
+            .successfulSendBodies()
+            .contains(
+                "{\"method\":\"subscribe\",\"subscription\":"
+                    + "{\"type\":\"l2Book\",\"coin\":\"BTC\",\"nSigFigs\":5}}"));
+
+    fixture.frame(
+        "{\"channel\":\"subscriptionResponse\",\"data\":{\"method\":\"subscribe\","
+            + "\"subscription\":{\"type\":\"l2Book\",\"coin\":\"BTC\",\"nSigFigs\":5}}}");
+    fixture.ack("BTC", "trades");
+    fixture.book("BTC", 1L, "100", "1", "101", "2");
+    fixture.drain();
+
+    assertEquals(
+        Arrays.asList("login", "added:BTC", "depth:BTC:1000000:100", "depth:BTC:1010000:200"),
+        fixture.trace);
+    fixture.closeTwice();
+    fixture.assertClosed();
+  }
+
   private static HyperliquidProcessBudget budget(
       int connections, int attempts, int frames, int subscriptions) {
     try {
@@ -710,6 +786,31 @@ public class ProviderEndToEndTest {
           Collections.singletonMap(
               HyperliquidFieldManager.TESTNET_FIELD,
               new CredentialsSerializationField(true, false, "true")));
+    }
+
+    private static LoginData sourceLogin(String source, boolean testnet) {
+      java.util.Map<String, CredentialsSerializationField> fields =
+          new java.util.HashMap<String, CredentialsSerializationField>();
+      fields.put(
+          HyperliquidFieldManager.SOURCE_FIELD,
+          new CredentialsSerializationField(true, false, source));
+      fields.put(
+          HyperliquidFieldManager.TESTNET_FIELD,
+          new CredentialsSerializationField(true, false, Boolean.toString(testnet)));
+      return new ExtendedLoginData(fields);
+    }
+
+    private void loginWithSource(String source, boolean testnet) {
+      provider.login(sourceLogin(source, testnet));
+      drain();
+      transport.completeMeta(200, metadata("BTC"));
+      drain();
+      transport.openSocket();
+      drain();
+    }
+
+    private void frame(String json) {
+      transport.emitTextFromConnection(transport.connectCalls().size() - 1, json);
     }
   }
 
