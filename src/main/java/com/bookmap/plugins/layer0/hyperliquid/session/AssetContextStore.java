@@ -8,7 +8,8 @@ import java.util.Set;
 
 /**
  * Holds the merged mark price of every coin the fastAssetCtxs feed reports. The first frame of a
- * connection is a full snapshot; later frames name only the coins that moved.
+ * connection is a full snapshot; later frames name only the coins that moved. All price values must
+ * be non-null; {@code AssetContextCodec} guarantees this by dropping unusable entries.
  */
 final class AssetContextStore {
 
@@ -16,6 +17,12 @@ final class AssetContextStore {
 
   /** Replaces the whole view, dropping coins the exchange no longer reports. */
   void applySnapshot(Map<String, BigDecimal> snapshot) {
+    for (Map.Entry<String, BigDecimal> entry : snapshot.entrySet()) {
+      if (entry.getValue() == null) {
+        throw new IllegalArgumentException(
+            "mark price for symbol '" + entry.getKey() + "' cannot be null");
+      }
+    }
     markPrices.clear();
     markPrices.putAll(snapshot);
   }
@@ -24,6 +31,10 @@ final class AssetContextStore {
   Set<String> applyDelta(Map<String, BigDecimal> delta) {
     Set<String> changed = new HashSet<String>();
     for (Map.Entry<String, BigDecimal> entry : delta.entrySet()) {
+      if (entry.getValue() == null) {
+        throw new IllegalArgumentException(
+            "mark price for symbol '" + entry.getKey() + "' cannot be null");
+      }
       BigDecimal previous = markPrices.put(entry.getKey(), entry.getValue());
       if (previous == null || previous.compareTo(entry.getValue()) != 0) {
         changed.add(entry.getKey());

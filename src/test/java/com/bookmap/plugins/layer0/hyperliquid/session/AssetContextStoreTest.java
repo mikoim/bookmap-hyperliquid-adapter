@@ -6,6 +6,7 @@ import static org.junit.Assert.assertTrue;
 
 import java.math.BigDecimal;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -63,6 +64,35 @@ public class AssetContextStoreTest {
   @Test
   public void unknownSymbolHasNoMarkPrice() {
     assertNull(store.markPrice("BTC"));
+  }
+
+  /** Different scales of the same price are recognized as unchanged. */
+  @Test
+  public void deltaWithDifferentScaleSameValueIsNotReportedAsChanged() {
+    store.applySnapshot(prices("BTC", "92.5"));
+
+    assertTrue(store.applyDelta(prices("BTC", "92.50")).isEmpty());
+  }
+
+  /** Snapshot with null value throws IllegalArgumentException. */
+  @Test(expected = IllegalArgumentException.class)
+  public void snapshotWithNullValueThrows() {
+    Map<String, BigDecimal> pricesWithNull = new HashMap<String, BigDecimal>();
+    pricesWithNull.put("BTC", new BigDecimal("79394.0"));
+    pricesWithNull.put("GONE", null);
+
+    store.applySnapshot(pricesWithNull);
+  }
+
+  /** Delta with null value throws IllegalArgumentException. */
+  @Test(expected = IllegalArgumentException.class)
+  public void deltaWithNullValueThrows() {
+    store.applySnapshot(prices("BTC", "79394.0"));
+
+    Map<String, BigDecimal> deltaWithNull = new HashMap<String, BigDecimal>();
+    deltaWithNull.put("ETH", null);
+
+    store.applyDelta(deltaWithNull);
   }
 
   private static Map<String, BigDecimal> prices(String... symbolsAndPrices) {
