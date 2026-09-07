@@ -85,7 +85,9 @@ Hyperliquid UI の HYPE ドロップダウン(0.001 / 0.002 / 0.005 / 0.01 / 0.1
 - `static BigDecimal defaultTick(BigDecimal referencePrice, int priceDecimals)` — `candidates` の先頭
 - `static L2BookParameters parametersFor(BigDecimal tick, BigDecimal referencePrice, int priceDecimals, Integer nLevels)`
   - サーバ量子の候補 `{省略: q_native, (5,null): 10^(d-5), (5,2): 2×10^(d-5), (5,5): 5×10^(d-5), (4): 10^(d-4), (3): 10^(d-3), (2): 10^(d-2)}`
-    のうち、`q_native` の整数倍であり、かつ `tick` を割り切る**最も粗い**ものを選ぶ。該当が無ければ省略
+    のうち、`q_native` の整数倍であり、かつ `tick` を割り切る**最も粗い**ものを選ぶ。該当が無ければ省略。
+    量子が同値のものが複数ある場合(例: HYPE で省略と `(5,null)` がともに 0.001)は省略を優先する
+  - `d` は `BigDecimal` の `precision() - scale()` で求める(`87.785` → 2、`0.0012345` → -2、`80203.0` → 5)
   - `nLevels` は与えられたときそのまま付ける(Borsa のみ 400)
   - 参照価格が無い場合は `nSigFigs`/`mantissa` を省略する
 
@@ -97,8 +99,12 @@ Hyperliquid UI の HYPE ドロップダウン(0.001 / 0.002 / 0.005 / 0.01 / 0.1
   `int askBucket(int nativeUnits)` = `ceilDiv(nativeUnits, ratio)`
 - `int[] nativeRange(int bucket, boolean bid)` — その枠に属するネイティブ単位の閉区間。
   bid: `[bucket×ratio, (bucket+1)×ratio - 1]`、ask: `[(bucket-1)×ratio + 1, bucket×ratio]`
-- `double tradePriceUnits(BigDecimal price)` = `price / tick` を `BigDecimal` で正確に割って double 化。
-  `tick = m×10^k`(`m ∈ {1,2,5}`)なので割り切れる。端数は許容する(Bookmap の trade 価格は double)
+- `double tradePriceUnits(BigDecimal price) throws ValueConversionException` = `price / tick` を
+  `BigDecimal` で正確に割って double 化。`tick = m×10^k`(`m ∈ {1,2,5}`)なので割り切れる。端数は許容する
+  (Bookmap の trade 価格は double)。null・非正は `NON_POSITIVE`、`2^53` 超は `TRADE_PRICE_OUT_OF_RANGE`
+  で失敗し、現行 `toTradePriceUnits` と同じ例外契約を保つ
+- `ratio` は `long` で計算し、`Integer.MAX_VALUE` を超える Tick は不正として拒否する
+  (`IllegalArgumentException`。`Provider` が事前に検証するため通常は到達しない)
 - `ratio == 1` のとき丸めは恒等写像となり、現行の挙動と一致する
 
 #### `PerpetualInstrument` の拡張
@@ -111,7 +117,7 @@ Hyperliquid UI の HYPE ドロップダウン(0.001 / 0.002 / 0.005 / 0.01 / 0.1
 | コンポーネント | 変更 |
 |---|---|
 | `HyperliquidConnector` | メタデータ要求本文を `{"type":"metaAndAssetCtxs"}` に変更 |
-| `HyperliquidMetaParser` | ルートが 2 要素配列であること、`ctxs` が `universe` と同じ長さであることを検証。各 `markPx` を文字列として読み、正の数なら `referencePrice` に設定、欠落・null・非数なら null(銘柄自体は受け入れる)。`universe` の検証ロジックは現行のまま |
+| `HyperliquidMetaParser` | ルートが 2 要素配列であること、`ctxs` が `universe` と同じ長さであることを検証。各 `markPx` を文字列として読み、正の数なら `referencePrice` に設定、要素が非オブジェクト・欠落・null・非数・非正なら null(銘柄自体は受け入れる)。`universe` の検証ロジックは現行のまま |
 | `SourceProfile` | `l2BookParameters()` を廃止し、代わりに `Integer nLevels()`(Borsa: 400、他: null)を提供。Hyperdash の固定 `nSigFigs: 5` を撤廃 |
 | `HyperliquidSessionApi` / `HyperliquidSession.subscribe` | 引数に `BigDecimal tick` を追加。`TickSizePlan.parametersFor` で `L2BookParameters` を決め、`SubscriptionRecord` に `PriceBucketer` を渡す |
 | `SubscriptionRecord` | `PriceBucketer` を保持し、`OrderBookSnapshotDiff` / `DeltaOrderBook` に渡す |
@@ -120,7 +126,7 @@ Hyperliquid UI の HYPE ドロップダウン(0.001 / 0.002 / 0.005 / 0.01 / 0.1
 | `HyperliquidSession.convertTrade` | `record.instrument().toTradePriceUnits` を `record.bucketer().tradePriceUnits` に置き換え |
 | `SessionSink.onInstrumentAdded` | 引数を `(PerpetualInstrument instrument, BigDecimal tick)` に変更 |
 | `Provider.pipsFor` | `TickSizePlan.candidates` / `defaultTick` を `DefaultAndList<Double>` で返す |
-| `Provider.subscribe` | `SubscribeInfoCrypto` なら `pips` を Tick として渡す。それ以外、または非正・ネイティブ格子の整数倍でない値なら `defaultTick` にフォールバックし `onDiagnostic` に記録 |
+| `Provider.subscribe` | `SubscribeInfoCrypto` なら `pips` を Tick として渡す。それ以外、または非正・ネイティブ格子の整数倍でない・`ratio` が int に収まらない値なら `defaultTick` にフォールバックし `Log.warn` に記録 |
 | `Provider.onInstrumentAdded` | `InstrumentInfo.pips` に選択 Tick を使う。`formatPrice` はこの `InstrumentInfo.pips` を参照するため変更不要 |
 | `L2BookParameters` | 変更なし(`nSigFigs`/`nLevels`/`mantissa` の送出は既存) |
 | `HyperliquidMessageParser` | 変更なし(ack の `nSigFigs`/`nLevels`/`mantissa`/`fast` は既に許容) |
@@ -171,8 +177,10 @@ Hyperliquid UI の HYPE ドロップダウン(0.001 / 0.002 / 0.005 / 0.01 / 0.1
   現行のメタデータ失敗と同じ経路(ログイン失敗)
 - `markPx` の欠落・null・非数・非正 → その銘柄の `referencePrice` は null。候補は 1 つ(ネイティブ格子)、
   サーバ集約は無し。ログインは成功する
-- `subscribe` の Tick が不正 → 既定 Tick にフォールバックし診断ログ。Bookmap 側には既定 Tick の
+- `subscribe` の Tick が不正 → 既定 Tick にフォールバックし警告ログ。Bookmap 側には既定 Tick の
   `InstrumentInfo` が届く
+- 購読 ack の照合は `SubscriptionKey.equals` が `coin` と `type` だけを比較するため、パラメータの有無に
+  影響されない(現行 Hyperdash の `nSigFigs: 5` で実証済み)
 - 価格が購読時の桁を上に越える → サーバの刻みが Tick より粗くなり、レベルは疎になるが正しい。
   下に越える → サーバの刻みが細かくなり、ローカル合算で正しさを保つが 20/400 レベルのカバー範囲は狭まる。
   いずれも再ログイン(参照価格の再取得)と再購読で回復する。README に明記する
