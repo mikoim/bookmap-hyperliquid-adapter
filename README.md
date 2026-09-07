@@ -73,12 +73,12 @@ it is not a general runtime selection mechanism.
 ```
 
 The adapter compiles to Java 8 bytecode. The thin adapter JAR is
-`build/libs/hyperliquid-adapter-1.1.0.jar`; Bookmap supplies the API, Gson, and Jetty dependencies.
+`build/libs/hyperliquid-adapter-1.2.0.jar`; Bookmap supplies the API, Gson, and Jetty dependencies.
 Load the module through its Bookmap annotations, or copy the JAR into the `API/Layer0ApiModules`
 directory of the Bookmap installation. On Linux that path is:
 
 ```text
-$HOME/.bookmap/API/Layer0ApiModules/hyperliquid-adapter-1.1.0.jar
+$HOME/.bookmap/API/Layer0ApiModules/hyperliquid-adapter-1.2.0.jar
 ```
 
 ## Operating limits
