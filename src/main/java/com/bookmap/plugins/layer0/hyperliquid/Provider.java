@@ -252,21 +252,26 @@ public final class Provider extends ExternalLiveBaseProvider {
     }
 
     @Override
-    public void onInstrumentAdded(String alias, PerpetualInstrument instrument, BigDecimal tick) {
+    public void onInstrumentAdded(
+        String requestedSymbol, PerpetualInstrument instrument, BigDecimal tick) {
       if (instrument == null) {
         return;
       }
+      // Bookmap knows the instrument by the exchange's own name; requestedSymbol is how it
+      // correlates that with the upper-cased symbol its Subscribe dialog asked for.
+      String alias = instrument.symbol();
       InstrumentInfo info =
           new InstrumentInfo(
-              alias,
-              "",
-              "PERPETUAL",
-              tick.doubleValue(),
-              1d,
-              null,
-              false,
-              instrument.sizeMultiplier(),
-              true);
+                  alias,
+                  "",
+                  "PERPETUAL",
+                  tick.doubleValue(),
+                  1d,
+                  null,
+                  false,
+                  instrument.sizeMultiplier(),
+                  true)
+              .toBuilder().setRequestedSymbol(requestedSymbol).build();
       Map<String, InstrumentInfo> updated = new HashMap<String, InstrumentInfo>(activeInstruments);
       updated.put(alias, info);
       activeInstruments = Collections.unmodifiableMap(updated);

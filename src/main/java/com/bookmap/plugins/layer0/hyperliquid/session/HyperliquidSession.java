@@ -525,7 +525,7 @@ public final class HyperliquidSession
       return;
     }
     for (SubscriptionRecord record : records.values()) {
-      if (record.alias().equals(alias)) {
+      if (record.alias().equals(alias) || record.requestedSymbol().equalsIgnoreCase(alias)) {
         removeRecord(record.instrument().symbol(), RemovalCause.USER, null);
         return;
       }
@@ -802,7 +802,7 @@ public final class HyperliquidSession
       return;
     }
     record.transitionToActive();
-    sink.onInstrumentAdded(record.alias(), record.instrument(), record.bucketer().tick());
+    sink.onInstrumentAdded(record.requestedSymbol(), record.instrument(), record.bucketer().tick());
     if (record.feedMode() == SourceProfile.FeedMode.SEED_THEN_DELTA) {
       publishDepth(record, record.deltaBook().publishStaged());
     } else {

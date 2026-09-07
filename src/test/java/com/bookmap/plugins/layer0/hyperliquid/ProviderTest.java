@@ -283,6 +283,26 @@ public class ProviderTest {
     assertEquals("87.78", provider.formatPrice("HYPE", 87.78d));
   }
 
+  /**
+   * Bookmap upper-cases the symbol it asks for, so the instrument is announced under the exchange's
+   * own name and the requested one travels in requestedSymbol, the field the platform reads when a
+   * provider subscribes to a different symbol than it was asked for.
+   */
+  @Test
+  public void announcesTheExchangeNameAndCarriesTheRequestedSymbol() {
+    FakeSessionFactory factory = new FakeSessionFactory();
+    Provider provider = new Provider(factory);
+    RecordingInstrumentListener listener = new RecordingInstrumentListener();
+    provider.addListener(listener);
+
+    factory.sink.onInstrumentAdded(
+        "KPEPE", new PerpetualInstrument("kPEPE", 2), new BigDecimal("0.01"));
+
+    assertEquals("kPEPE", listener.alias);
+    assertEquals("kPEPE", listener.instrument.symbol);
+    assertEquals("KPEPE", listener.instrument.requestedSymbol);
+  }
+
   /** Prevents accidental order routing through a market-data-only adapter. */
   @Test
   public void orderEntryFailsClosedWithoutTouchingSession() {

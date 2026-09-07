@@ -34,9 +34,10 @@ perp dex:
 - Bookmap's Subscribe dialog upper-cases the symbol before it reaches the adapter, so a name that
   is not already upper-case — every HIP-3 market and the `k`-prefixed ones such as `kPEPE` — is
   matched case-insensitively. Two names differing only by case would be indistinguishable, so such
-  a request is reported as not found rather than resolved to a guess. The instrument list shows the
-  exchange's own spelling and the wire uses it, but the chart and the saved workspace carry the
-  upper-cased name Bookmap asked for.
+  a request is reported as not found rather than resolved to a guess. The instrument is then
+  announced under the exchange's own spelling, with the upper-cased request handed back as
+  `InstrumentInfo.requestedSymbol`, so Bookmap correlates the two and shows `xyz:CL` rather than
+  `XYZ:CL` everywhere. That field requires Bookmap 7.8 or newer.
 - Each subscription uses one `l2Book` feed and one `trades` feed on a single WebSocket. Hyperliquid
   and Hyperdash snapshots carry at most 20 levels per side; Borsa serves up to 400 levels per side.
   Coarser tick sizes therefore cover a wider price range with the same number of levels. Trades

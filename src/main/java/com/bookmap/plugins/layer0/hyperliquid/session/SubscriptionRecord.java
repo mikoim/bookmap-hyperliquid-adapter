@@ -31,7 +31,7 @@ public final class SubscriptionRecord {
 
   static final int MAX_PENDING_TRADES = 1_024;
 
-  private final String alias;
+  private final String requestedSymbol;
   private final PerpetualInstrument instrument;
   private final SubscriptionPermit permit;
   private final SubscriptionKey l2BookKey;
@@ -58,14 +58,14 @@ public final class SubscriptionRecord {
 
   /** Creates an alias record with its two reserved provider subscription slots. */
   public SubscriptionRecord(
-      String alias,
+      String requestedSymbol,
       PerpetualInstrument instrument,
       SubscriptionPermit permit,
       long activationDeadlineMillis,
       SourceProfile.FeedMode feedMode,
       L2BookParameters l2BookParameters,
       PriceBucketer bucketer) {
-    this.alias = alias;
+    this.requestedSymbol = requestedSymbol;
     this.instrument = instrument;
     this.permit = permit;
     this.activationDeadlineMillis = activationDeadlineMillis;
@@ -108,7 +108,15 @@ public final class SubscriptionRecord {
 
   /** Returns the Bookmap alias for this record. */
   public String alias() {
-    return alias;
+    return instrument.symbol();
+  }
+
+  /**
+   * Returns the symbol Bookmap asked for. Its Subscribe dialog upper-cases what the user picked, so
+   * this can differ in case from {@link #alias()}, which is the exchange's own name.
+   */
+  public String requestedSymbol() {
+    return requestedSymbol;
   }
 
   /** Returns the instrument metadata used to normalize provider values. */

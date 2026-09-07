@@ -616,8 +616,8 @@ public class ProviderEndToEndTest {
 
   /**
    * Bookmap's Subscribe dialog upper-cases the symbol, so a subscription must still reach the
-   * instrument, keep the exchange's own spelling on the wire, and be announced under the alias
-   * Bookmap asked for.
+   * instrument, keep the exchange's own spelling on the wire and in everything Bookmap displays,
+   * and hand the upper-cased request back as requestedSymbol so the platform can correlate them.
    */
   @Test
   public void subscriptionSurvivesBookmapUppercasingTheSymbol() {
@@ -642,17 +642,21 @@ public class ProviderEndToEndTest {
             .successfulSendBodies()
             .toString()
             .contains("\"coin\":\"xyz:CL\""));
-    assertEquals(Collections.singletonList("XYZ:CL"), fixture.instruments.added);
+    assertEquals(Collections.singletonList("xyz:CL"), fixture.instruments.added);
+    assertEquals("xyz:CL", fixture.instruments.lastInfo.symbol);
+    assertEquals("XYZ:CL", fixture.instruments.lastInfo.requestedSymbol);
     assertEquals(0.001d, fixture.instruments.lastInfo.pips, 1e-12d);
     assertTrue(
-        fixture.data.depths.toString(), fixture.data.depths.get(0).startsWith("depth:XYZ:CL:"));
+        fixture.data.depths.toString(), fixture.data.depths.get(0).startsWith("depth:xyz:CL:"));
     assertTrue(
-        fixture.data.trades.toString(), fixture.data.trades.get(0).startsWith("trade:XYZ:CL:"));
+        fixture.data.trades.toString(), fixture.data.trades.get(0).startsWith("trade:xyz:CL:"));
 
+    // Unsubscribing by the requested spelling covers the tolerance branch; every other test
+    // unsubscribes by a name where the requested and exchange spellings are identical.
     fixture.provider.unsubscribe("XYZ:CL");
     fixture.drain();
     fixture.completeSends();
-    assertEquals(Collections.singletonList("XYZ:CL"), fixture.instruments.removed);
+    assertEquals(Collections.singletonList("xyz:CL"), fixture.instruments.removed);
     fixture.closeTwice();
     fixture.assertClosed();
   }
