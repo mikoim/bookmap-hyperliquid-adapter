@@ -347,7 +347,7 @@ public final class HyperliquidConnector implements AutoCloseable {
           transport.postJson(
               profile.infoUri(),
               "application/json",
-              "{\"type\":\"metaAndAssetCtxs\"}",
+              "{\"type\":\"allPerpMetas\"}",
               METADATA_TIMEOUT_MILLIS,
               new HyperliquidTransport.HttpCallback() {
                 @Override
@@ -401,7 +401,7 @@ public final class HyperliquidConnector implements AutoCloseable {
       return;
     }
     try {
-      listener.onMetadata(metaParser.parse(body));
+      listener.onMetadata(metaParser.parseAllPerpMetas(body));
     } catch (ProtocolException failureException) {
       reportInitialFailure(classify(failureException, TransportFailure.Kind.PROTOCOL));
       return;

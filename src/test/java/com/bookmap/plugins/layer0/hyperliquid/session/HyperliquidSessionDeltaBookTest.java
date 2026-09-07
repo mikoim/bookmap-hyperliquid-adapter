@@ -292,7 +292,7 @@ public class HyperliquidSessionDeltaBookTest {
     void login() {
       session.login(SourceProfile.of(MarketDataSource.BORSA, HyperliquidEnvironment.MAINNET));
       drain();
-      transport.completeMeta(200, TestMetadata.wrap(TestMetadata.universe("BTC")));
+      transport.completeMeta(200, TestMetadata.allPerpMetas(TestMetadata.universe("BTC")));
       drain();
       transport.openConnection(0);
       drain();

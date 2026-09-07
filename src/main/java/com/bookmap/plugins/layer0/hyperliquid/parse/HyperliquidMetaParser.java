@@ -1,57 +1,48 @@
 package com.bookmap.plugins.layer0.hyperliquid.parse;
 
 import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Parses and validates Hyperliquid perpetual-instrument metadata responses. */
+/** Parses and validates Hyperliquid perpetual-instrument metadata for every perp dex. */
 public final class HyperliquidMetaParser {
 
   /**
-   * Parses a complete metaAndAssetCtxs response, filtering delisted entries only after validation.
-   * The response is {@code [meta, ctxs]}; {@code ctxs[i].markPx} becomes the reference price of
-   * {@code meta.universe[i]} when it is a positive decimal string, and null otherwise.
+   * Parses an allPerpMetas response: one element per perp dex, each an object with a universe.
+   * HIP-3 names arrive fully qualified as {@code dex:coin}, so no dex prefix is applied here.
+   * Delisted entries are filtered only after every entry has been validated.
    */
-  public List<PerpetualInstrument> parse(String json) throws ProtocolException {
+  public List<PerpetualInstrument> parseAllPerpMetas(String json) throws ProtocolException {
     try {
       JsonElement root = new JsonParser().parse(json);
-      if (!root.isJsonArray() || root.getAsJsonArray().size() != 2) {
-        throw new ProtocolException("metadata response must be a two-element array");
+      if (root == null || !root.isJsonArray()) {
+        throw new ProtocolException("allPerpMetas response must be an array");
       }
-      JsonElement meta = root.getAsJsonArray().get(0);
-      JsonElement contexts = root.getAsJsonArray().get(1);
-      if (!meta.isJsonObject()) {
-        throw new ProtocolException("metadata must be an object");
-      }
-      JsonElement universe = meta.getAsJsonObject().get("universe");
-      if (universe == null || !universe.isJsonArray()) {
-        throw new ProtocolException("universe must be an array");
-      }
-      JsonArray universeArray = universe.getAsJsonArray();
-      if (!contexts.isJsonArray() || contexts.getAsJsonArray().size() != universeArray.size()) {
-        throw new ProtocolException("asset contexts must match the universe");
-      }
-      JsonArray contextArray = contexts.getAsJsonArray();
-
       List<MetadataEntry> entries = new ArrayList<MetadataEntry>();
       Set<String> names = new HashSet<String>();
-      for (int index = 0; index < universeArray.size(); index++) {
-        entries.add(parseEntry(universeArray.get(index), names, contextArray.get(index)));
+      for (JsonElement dex : root.getAsJsonArray()) {
+        if (!dex.isJsonObject()) {
+          throw new ProtocolException("perp dex metadata must be an object");
+        }
+        JsonElement universe = dex.getAsJsonObject().get("universe");
+        if (universe == null || !universe.isJsonArray()) {
+          throw new ProtocolException("universe must be an array");
+        }
+        for (JsonElement element : universe.getAsJsonArray()) {
+          entries.add(parseEntry(element, names));
+        }
       }
 
       List<PerpetualInstrument> instruments = new ArrayList<PerpetualInstrument>();
       for (MetadataEntry entry : entries) {
         if (!entry.delisted) {
-          instruments.add(
-              new PerpetualInstrument(entry.name, entry.sizeDecimals, entry.referencePrice));
+          instruments.add(new PerpetualInstrument(entry.name, entry.sizeDecimals));
         }
       }
       return instruments;
@@ -62,7 +53,7 @@ public final class HyperliquidMetaParser {
     }
   }
 
-  private MetadataEntry parseEntry(JsonElement element, Set<String> names, JsonElement context)
+  private MetadataEntry parseEntry(JsonElement element, Set<String> names)
       throws ProtocolException {
     if (!element.isJsonObject()) {
       throw new ProtocolException("universe entry must be an object");
@@ -95,8 +86,7 @@ public final class HyperliquidMetaParser {
       }
       isDelisted = delisted.getAsBoolean();
     }
-    return new MetadataEntry(
-        name, Integer.parseInt(rawSizeDecimals), isDelisted, referencePrice(context));
+    return new MetadataEntry(name, Integer.parseInt(rawSizeDecimals), isDelisted);
   }
 
   private String requiredString(JsonObject object, String field) throws ProtocolException {
@@ -111,46 +101,15 @@ public final class HyperliquidMetaParser {
     return primitive.getAsString();
   }
 
-  /**
-   * Reads a positive decimal markPx string; anything else yields no reference price. Values whose
-   * magnitude is absurd (precision or scale beyond 20 digits, e.g. {@code "1E+999999996"}) are also
-   * rejected, since they would later overflow {@link BigDecimal} arithmetic in tick-size
-   * computations.
-   */
-  private static BigDecimal referencePrice(JsonElement context) {
-    if (context == null || !context.isJsonObject()) {
-      return null;
-    }
-    JsonElement markPx = context.getAsJsonObject().get("markPx");
-    if (markPx == null || !markPx.isJsonPrimitive() || !markPx.getAsJsonPrimitive().isString()) {
-      return null;
-    }
-    try {
-      BigDecimal price = new BigDecimal(markPx.getAsString());
-      if (price.signum() <= 0) {
-        return null;
-      }
-      if (price.precision() > 20 || Math.abs(price.scale()) > 20) {
-        return null;
-      }
-      return price;
-    } catch (NumberFormatException invalid) {
-      return null;
-    }
-  }
-
   private static final class MetadataEntry {
     private final String name;
     private final int sizeDecimals;
     private final boolean delisted;
-    private final BigDecimal referencePrice;
 
-    private MetadataEntry(
-        String name, int sizeDecimals, boolean delisted, BigDecimal referencePrice) {
+    private MetadataEntry(String name, int sizeDecimals, boolean delisted) {
       this.name = name;
       this.sizeDecimals = sizeDecimals;
       this.delisted = delisted;
-      this.referencePrice = referencePrice;
     }
   }
 }

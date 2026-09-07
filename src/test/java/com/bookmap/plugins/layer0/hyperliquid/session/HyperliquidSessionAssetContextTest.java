@@ -155,7 +155,7 @@ public class HyperliquidSessionAssetContextTest {
     Fixture() {
       session.login(SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
       drain();
-      transport.completeMeta(200, TestMetadata.wrap(TestMetadata.universe("HYPE")));
+      transport.completeMeta(200, TestMetadata.allPerpMetas(TestMetadata.universe("HYPE")));
       drain();
       transport.openSocket();
       drain();

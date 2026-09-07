@@ -239,13 +239,17 @@ public class HyperliquidSessionTickSizeTest {
       this.source = source;
       session.login(SourceProfile.of(source, HyperliquidEnvironment.MAINNET));
       drain();
-      transport.completeMeta(
-          200, TestMetadata.wrap(TestMetadata.universe("HYPE"), new String[] {markPx}));
+      transport.completeMeta(200, TestMetadata.allPerpMetas(TestMetadata.universe("HYPE")));
       drain();
       transport.openConnection(0);
       drain();
       if (source == MarketDataSource.HYPERLIQUID) {
         transport.socket().succeedNextSend();
+        drain();
+      }
+      if (markPx != null) {
+        session.onFrame(
+            1L, TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"" + markPx + "\"}}"));
         drain();
       }
       sink.events().clear();

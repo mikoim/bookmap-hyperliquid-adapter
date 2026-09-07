@@ -716,13 +716,9 @@ public class ProviderEndToEndTest {
     }
 
     private void loginWithPricedMetadata(String symbol, String markPx) {
-      provider.login(mainnetLogin());
-      drain();
-      transport.completeMeta(200, metadata(new String[] {symbol}, markPx));
-      drain();
-      transport.openSocket();
-      drain();
-      transport.socket().succeedNextSend();
+      loginWithMetadata(symbol);
+      frame(
+          TestMetadata.assetContextsFrame("{\"" + symbol + "\":{\"markPx\":\"" + markPx + "\"}}"));
       drain();
     }
 
@@ -929,11 +925,7 @@ public class ProviderEndToEndTest {
   }
 
   private static String metadata(String... symbols) {
-    return TestMetadata.wrap(TestMetadata.universe(symbols));
-  }
-
-  private static String metadata(String[] symbols, String... markPxs) {
-    return TestMetadata.wrap(TestMetadata.universe(symbols), markPxs);
+    return TestMetadata.allPerpMetas(TestMetadata.universe(symbols));
   }
 
   private static final class Clock implements LongSupplier {

@@ -1,13 +1,11 @@
 package com.bookmap.plugins.layer0.hyperliquid;
 
-import com.google.gson.JsonElement;
-import com.google.gson.JsonParser;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.zip.Deflater;
 
-/** Builds metaAndAssetCtxs responses for tests from a legacy universe object. */
+/** Builds allPerpMetas responses and fastAssetCtxs frames for tests. */
 public final class TestMetadata {
 
   private TestMetadata() {
@@ -48,35 +46,15 @@ public final class TestMetadata {
     return result.append("]}").toString();
   }
 
-  /** Wraps a universe object as {@code [meta, ctxs]} with one empty context per entry. */
-  public static String wrap(String metaObject) {
-    return wrap(metaObject, new String[0]);
-  }
-
-  /** Wraps a universe object as {@code [meta, ctxs]}; each markPx (or null) fills one context. */
-  public static String wrap(String metaObject, String... markPxs) {
-    int count = universeSize(metaObject);
-    StringBuilder contexts = new StringBuilder("[");
-    for (int i = 0; i < count; i++) {
-      if (i != 0) {
-        contexts.append(',');
+  /** Wraps universe objects as an allPerpMetas response, one element per perp dex. */
+  public static String allPerpMetas(String... metaObjects) {
+    StringBuilder result = new StringBuilder("[");
+    for (int index = 0; index < metaObjects.length; index++) {
+      if (index != 0) {
+        result.append(',');
       }
-      if (i < markPxs.length && markPxs[i] != null) {
-        contexts.append("{\"markPx\":\"").append(markPxs[i]).append("\"}");
-      } else {
-        contexts.append("{}");
-      }
+      result.append(metaObjects[index]);
     }
-    return "[" + metaObject + "," + contexts.append(']') + "]";
-  }
-
-  private static int universeSize(String metaObject) {
-    try {
-      JsonElement root = new JsonParser().parse(metaObject);
-      JsonElement universe = root.isJsonObject() ? root.getAsJsonObject().get("universe") : null;
-      return universe != null && universe.isJsonArray() ? universe.getAsJsonArray().size() : 0;
-    } catch (RuntimeException invalid) {
-      return 0;
-    }
+    return result.append(']').toString();
   }
 }

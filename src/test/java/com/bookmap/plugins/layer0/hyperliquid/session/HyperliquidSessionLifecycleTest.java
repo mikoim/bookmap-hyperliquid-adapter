@@ -33,7 +33,8 @@ public class HyperliquidSessionLifecycleTest {
   public void invalidMetadataFailsFatallyWithoutOpeningWebSocket() {
     Fixture fixture = new Fixture();
     fixture.startLogin();
-    fixture.transport.completeMeta(200, TestMetadata.wrap("{\"universe\":[{\"name\":\"BTC\"}]}"));
+    fixture.transport.completeMeta(
+        200, TestMetadata.allPerpMetas("{\"universe\":[{\"name\":\"BTC\"}]}"));
     fixture.drain();
 
     assertEquals(1, count(fixture.sink.events(), "login-failed:FATAL"));
@@ -90,7 +91,7 @@ public class HyperliquidSessionLifecycleTest {
   public void initialHandshakeTimeoutIsNoInternetAndDoesNotReconnect() {
     Fixture fixture = new Fixture();
     fixture.startLogin();
-    fixture.transport.completeMeta(200, TestMetadata.wrap(TestMetadata.universe("BTC")));
+    fixture.transport.completeMeta(200, TestMetadata.allPerpMetas(TestMetadata.universe("BTC")));
     fixture.drain();
     fixture.clock.now = 10_000L;
     fixture.scheduler.advanceBy(10_000L);
@@ -107,7 +108,7 @@ public class HyperliquidSessionLifecycleTest {
   public void initialHandshakeNetworkFailureIsNoInternetAndDoesNotReconnect() {
     Fixture fixture = new Fixture();
     fixture.startLogin();
-    fixture.transport.completeMeta(200, TestMetadata.wrap(TestMetadata.universe("BTC")));
+    fixture.transport.completeMeta(200, TestMetadata.allPerpMetas(TestMetadata.universe("BTC")));
     fixture.drain();
     fixture.transport.failSocket(new SocketTimeoutException("handshake failed"));
     fixture.drain();
@@ -531,7 +532,7 @@ public class HyperliquidSessionLifecycleTest {
     fixture.startLogin();
     fixture.session.close();
     fixture.drain();
-    fixture.transport.completeMeta(200, TestMetadata.wrap(TestMetadata.universe("BTC")));
+    fixture.transport.completeMeta(200, TestMetadata.allPerpMetas(TestMetadata.universe("BTC")));
     fixture.drain();
 
     assertTrue(fixture.sink.events().isEmpty());
@@ -728,7 +729,7 @@ public class HyperliquidSessionLifecycleTest {
         metadata.append("\",\"szDecimals\":2}");
       }
       metadata.append("]}");
-      transport.completeMeta(200, TestMetadata.wrap(metadata.toString()));
+      transport.completeMeta(200, TestMetadata.allPerpMetas(metadata.toString()));
       drain();
       transport.openSocket();
       drain();

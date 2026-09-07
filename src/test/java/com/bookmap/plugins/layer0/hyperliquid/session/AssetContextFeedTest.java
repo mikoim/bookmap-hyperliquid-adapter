@@ -359,7 +359,7 @@ public class AssetContextFeedTest {
               AssetContextFeedTest::noop);
       session.login(SourceProfile.of(source, HyperliquidEnvironment.MAINNET));
       drain();
-      transport.completeMeta(200, TestMetadata.wrap(TestMetadata.universe("HYPE")));
+      transport.completeMeta(200, TestMetadata.allPerpMetas(TestMetadata.universe("HYPE")));
       drain();
       for (int index = 0; index < transport.connectCalls().size(); index++) {
         if (!openFeedConnection && index == FEED_CONNECTION) {

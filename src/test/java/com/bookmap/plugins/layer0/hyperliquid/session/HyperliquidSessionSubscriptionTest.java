@@ -814,7 +814,7 @@ public class HyperliquidSessionSubscriptionTest {
         metadata.append("\",\"szDecimals\":2}");
       }
       metadata.append("]}");
-      transport.completeMeta(200, TestMetadata.wrap(metadata.toString()));
+      transport.completeMeta(200, TestMetadata.allPerpMetas(metadata.toString()));
       drain();
       transport.openSocket();
       drain();
