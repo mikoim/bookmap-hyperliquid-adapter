@@ -12,6 +12,7 @@ import com.bookmap.plugins.layer0.hyperliquid.session.HyperliquidSessionApi;
 import com.bookmap.plugins.layer0.hyperliquid.session.LoginFailure;
 import com.bookmap.plugins.layer0.hyperliquid.session.MessageKind;
 import com.bookmap.plugins.layer0.hyperliquid.session.SessionSink;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -131,7 +132,7 @@ public class ProviderTest {
     RecordingInstrumentListener listener = new RecordingInstrumentListener();
     provider.addListener(listener);
 
-    factory.sink.onInstrumentAdded(instrument);
+    factory.sink.onInstrumentAdded(instrument, BigDecimal.valueOf(instrument.pips()));
 
     assertEquals(
         Collections.singletonList(new SubscribeInfo("ETH", "", "PERPETUAL")),
@@ -160,7 +161,7 @@ public class ProviderTest {
     factory.sink.onConnectionLost(ConnectionFailure.UNKNOWN, "unknown");
     factory.sink.onConnectionLost(ConnectionFailure.FATAL, "fatal lost");
     factory.sink.onConnectionRestored();
-    factory.sink.onInstrumentAdded(instrument);
+    factory.sink.onInstrumentAdded(instrument, BigDecimal.valueOf(instrument.pips()));
     factory.sink.onInstrumentNotFound("X", "", "PERPETUAL");
     factory.sink.onInstrumentAlreadySubscribed("X", "", "PERPETUAL");
     factory.sink.onDepth("SOL", new DepthUpdate(true, 123, 45));
@@ -272,6 +273,7 @@ public class ProviderTest {
   private static final class FakeSession implements HyperliquidSessionApi {
     private SourceProfile lastLoginProfile;
     private int commandCount;
+    private BigDecimal lastTick;
 
     @Override
     public void login(SourceProfile profile) {
@@ -282,6 +284,12 @@ public class ProviderTest {
     @Override
     public void subscribe(String symbol, String exchange, String type) {
       commandCount++;
+    }
+
+    @Override
+    public void subscribe(String symbol, String exchange, String type, BigDecimal tick) {
+      commandCount++;
+      lastTick = tick;
     }
 
     @Override

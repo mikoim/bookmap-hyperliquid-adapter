@@ -4,6 +4,7 @@ import com.bookmap.plugins.layer0.hyperliquid.SourceProfile;
 import com.bookmap.plugins.layer0.hyperliquid.book.DeltaOrderBook;
 import com.bookmap.plugins.layer0.hyperliquid.book.OrderBookSnapshotDiff;
 import com.bookmap.plugins.layer0.hyperliquid.book.OrderBookSnapshotDiff.NormalizedBookSnapshot;
+import com.bookmap.plugins.layer0.hyperliquid.book.PriceBucketer;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget.SubscriptionPermit;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.CancellableScheduler;
 import com.bookmap.plugins.layer0.hyperliquid.model.DepthUpdate;
@@ -39,6 +40,7 @@ public final class SubscriptionRecord {
   private final OrderBookSnapshotDiff diff;
   private final SourceProfile.FeedMode feedMode;
   private final DeltaOrderBook deltaBook;
+  private final PriceBucketer bucketer;
   private final ArrayDeque<PendingTrade> pendingTrades = new ArrayDeque<PendingTrade>();
   private final Set<TradeKey> pendingTradeKeys = new HashSet<TradeKey>();
   private final EnumSet<SubscriptionType> sent = EnumSet.noneOf(SubscriptionType.class);
@@ -61,18 +63,27 @@ public final class SubscriptionRecord {
       SubscriptionPermit permit,
       long activationDeadlineMillis,
       SourceProfile.FeedMode feedMode,
-      L2BookParameters l2BookParameters) {
+      L2BookParameters l2BookParameters,
+      PriceBucketer bucketer) {
     this.alias = alias;
     this.instrument = instrument;
     this.permit = permit;
     this.activationDeadlineMillis = activationDeadlineMillis;
     this.feedMode = feedMode;
+    this.bucketer = bucketer;
     l2BookKey =
         new SubscriptionKey(instrument.symbol(), SubscriptionType.L2_BOOK, l2BookParameters);
     tradesKey = new SubscriptionKey(instrument.symbol(), SubscriptionType.TRADES);
-    diff = new OrderBookSnapshotDiff(instrument);
+    diff = new OrderBookSnapshotDiff(instrument, bucketer);
     deltaBook =
-        feedMode == SourceProfile.FeedMode.SEED_THEN_DELTA ? new DeltaOrderBook(instrument) : null;
+        feedMode == SourceProfile.FeedMode.SEED_THEN_DELTA
+            ? new DeltaOrderBook(instrument, bucketer)
+            : null;
+  }
+
+  /** Returns the bucketer that maps native prices onto this alias's Bookmap tick. */
+  public PriceBucketer bucketer() {
+    return bucketer;
   }
 
   /** Returns how this alias's source delivers l2Book frames. */

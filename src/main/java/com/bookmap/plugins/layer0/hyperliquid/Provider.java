@@ -211,7 +211,7 @@ public final class Provider extends ExternalLiveBaseProvider {
     }
 
     @Override
-    public void onInstrumentAdded(PerpetualInstrument instrument) {
+    public void onInstrumentAdded(PerpetualInstrument instrument, BigDecimal tick) {
       if (instrument == null) {
         return;
       }
@@ -220,7 +220,7 @@ public final class Provider extends ExternalLiveBaseProvider {
               instrument.symbol(),
               "",
               "PERPETUAL",
-              instrument.pips(),
+              tick.doubleValue(),
               1d,
               null,
               false,

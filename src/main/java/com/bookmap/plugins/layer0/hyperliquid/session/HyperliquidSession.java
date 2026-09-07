@@ -5,6 +5,7 @@ import com.bookmap.plugins.layer0.hyperliquid.OutboundMessage;
 import com.bookmap.plugins.layer0.hyperliquid.SourceProfile;
 import com.bookmap.plugins.layer0.hyperliquid.book.DeltaOrderBook;
 import com.bookmap.plugins.layer0.hyperliquid.book.OrderBookSnapshotDiff.SnapshotValidation;
+import com.bookmap.plugins.layer0.hyperliquid.book.PriceBucketer;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget.Decision;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget.SubscriptionPermit;
@@ -13,17 +14,20 @@ import com.bookmap.plugins.layer0.hyperliquid.concurrent.StateEventDispatcher;
 import com.bookmap.plugins.layer0.hyperliquid.model.BookSnapshot;
 import com.bookmap.plugins.layer0.hyperliquid.model.ControlEvent;
 import com.bookmap.plugins.layer0.hyperliquid.model.DepthUpdate;
+import com.bookmap.plugins.layer0.hyperliquid.model.L2BookParameters;
 import com.bookmap.plugins.layer0.hyperliquid.model.MarketDataEvent;
 import com.bookmap.plugins.layer0.hyperliquid.model.ParsedFrame;
 import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionKey;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionType;
+import com.bookmap.plugins.layer0.hyperliquid.model.TickSizePlan;
 import com.bookmap.plugins.layer0.hyperliquid.model.TradeEvent;
 import com.bookmap.plugins.layer0.hyperliquid.model.ValueConversionException;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMessageParser;
 import com.bookmap.plugins.layer0.hyperliquid.session.SubscriptionRecord.PendingTrade;
 import com.bookmap.plugins.layer0.hyperliquid.trade.BoundedTradeDeduplicator;
 import com.bookmap.plugins.layer0.hyperliquid.transport.TransportFailure;
+import java.math.BigDecimal;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -123,15 +127,22 @@ public final class HyperliquidSession
         });
   }
 
-  /** Enqueues an asynchronous perpetual subscription command. */
+  /** Enqueues an asynchronous perpetual subscription command at the default tick. */
   @Override
   public void subscribe(final String symbol, final String exchange, final String type) {
+    subscribe(symbol, exchange, type, null);
+  }
+
+  /** Enqueues an asynchronous perpetual subscription command at the chosen tick. */
+  @Override
+  public void subscribe(
+      final String symbol, final String exchange, final String type, final BigDecimal tick) {
     final long activationDeadlineMillis = clock.getAsLong() + ACTIVATION_TIMEOUT_MILLIS;
     dispatcher.submitControl(
         new Runnable() {
           @Override
           public void run() {
-            handleSubscribe(symbol, exchange, type, activationDeadlineMillis);
+            handleSubscribe(symbol, exchange, type, tick, activationDeadlineMillis);
           }
         });
   }
@@ -345,7 +356,7 @@ public final class HyperliquidSession
   }
 
   private void handleSubscribe(
-      String symbol, String exchange, String type, long activationDeadlineMillis) {
+      String symbol, String exchange, String type, BigDecimal tick, long activationDeadlineMillis) {
     if (closed) {
       return;
     }
@@ -368,6 +379,23 @@ public final class HyperliquidSession
           "Hyperliquid subscription limit reached", MessageKind.SUBSCRIPTION_LIMIT);
       return;
     }
+    BigDecimal defaultTick =
+        TickSizePlan.defaultTick(instrument.referencePrice(), instrument.priceDecimals());
+    BigDecimal resolvedTick = defaultTick;
+    if (tick != null) {
+      if (TickSizePlan.isSupportedTick(tick, instrument.priceDecimals())) {
+        resolvedTick = tick;
+      } else {
+        sink.onDiagnostic(
+            "unsupported tick " + tick.toPlainString() + " for " + symbol + "; using default");
+      }
+    }
+    L2BookParameters parameters =
+        TickSizePlan.parametersFor(
+            resolvedTick,
+            instrument.referencePrice(),
+            instrument.priceDecimals(),
+            profile.nLevels());
     final SubscriptionRecord record =
         new SubscriptionRecord(
             symbol,
@@ -375,7 +403,8 @@ public final class HyperliquidSession
             decision.permit(),
             activationDeadlineMillis,
             profile.feedMode(),
-            profile.l2BookParameters());
+            parameters,
+            new PriceBucketer(instrument, resolvedTick));
     records.put(symbol, record);
     record.setActivationTask(
         scheduler.schedule(
@@ -607,7 +636,7 @@ public final class HyperliquidSession
     try {
       return new PendingTrade(
           trade.key(),
-          record.instrument().toTradePriceUnits(trade.price()),
+          record.bucketer().tradePriceUnits(trade.price()),
           record.instrument().toSizeUnits(trade.size()),
           trade.isBuyAggressor());
     } catch (ValueConversionException failure) {
@@ -626,7 +655,7 @@ public final class HyperliquidSession
       return;
     }
     record.transitionToActive();
-    sink.onInstrumentAdded(record.instrument());
+    sink.onInstrumentAdded(record.instrument(), record.bucketer().tick());
     if (record.feedMode() == SourceProfile.FeedMode.SEED_THEN_DELTA) {
       publishDepth(record, record.deltaBook().publishStaged());
     } else {

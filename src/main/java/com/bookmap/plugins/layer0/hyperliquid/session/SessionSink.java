@@ -2,6 +2,7 @@ package com.bookmap.plugins.layer0.hyperliquid.session;
 
 import com.bookmap.plugins.layer0.hyperliquid.model.DepthUpdate;
 import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
+import java.math.BigDecimal;
 import java.util.List;
 
 /** Receives validated Hyperliquid session lifecycle and market-data output. */
@@ -10,8 +11,8 @@ public interface SessionSink {
   /** Reports the complete available perpetual-instrument list. */
   void onKnownInstruments(List<PerpetualInstrument> instruments);
 
-  /** Reports an instrument that completed subscription activation. */
-  void onInstrumentAdded(PerpetualInstrument instrument);
+  /** Publishes one active instrument at the tick its depth and trade units are expressed in. */
+  void onInstrumentAdded(PerpetualInstrument instrument, BigDecimal tick);
 
   /** Reports an active instrument that has been removed. */
   void onInstrumentRemoved(String alias);

@@ -1,6 +1,5 @@
 package com.bookmap.plugins.layer0.hyperliquid;
 
-import com.bookmap.plugins.layer0.hyperliquid.model.L2BookParameters;
 import java.net.URI;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -23,14 +22,13 @@ public final class SourceProfile {
   static final String BROWSER_USER_AGENT =
       "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
           + "Chrome/128.0.0.0 Safari/537.36";
-  private static final L2BookParameters HYPERDASH_PARAMETERS =
-      new L2BookParameters(Integer.valueOf(5), null, null);
+  static final int BORSA_LEVELS = 400;
 
   private final MarketDataSource source;
   private final HyperliquidEnvironment environment;
   private final URI webSocketUri;
   private final Map<String, String> handshakeHeaders;
-  private final L2BookParameters l2BookParameters;
+  private final Integer nLevels;
   private final FeedMode feedMode;
 
   private SourceProfile(
@@ -38,20 +36,22 @@ public final class SourceProfile {
       HyperliquidEnvironment environment,
       URI webSocketUri,
       Map<String, String> handshakeHeaders,
-      L2BookParameters l2BookParameters,
+      Integer nLevels,
       FeedMode feedMode) {
     this.source = source;
     this.environment = environment;
     this.webSocketUri = webSocketUri;
     this.handshakeHeaders =
         Collections.unmodifiableMap(new LinkedHashMap<String, String>(handshakeHeaders));
-    this.l2BookParameters = l2BookParameters;
+    this.nLevels = nLevels;
     this.feedMode = feedMode;
   }
 
   /**
    * Resolves the profile for a source. Hyperliquid follows the selected environment; Borsa and
-   * Hyperdash relay the Mainnet book, so their metadata always comes from Mainnet.
+   * Hyperdash relay the Mainnet book, so their metadata always comes from Mainnet. Borsa serves up
+   * to {@link #BORSA_LEVELS} levels per side; Hyperdash accepts {@code nSigFigs} but rejects {@code
+   * nLevels}.
    */
   public static SourceProfile of(MarketDataSource source, HyperliquidEnvironment environment) {
     if (source == null || environment == null) {
@@ -65,7 +65,7 @@ public final class SourceProfile {
             HyperliquidEnvironment.MAINNET,
             BORSA_WEB_SOCKET_URI,
             noHeaders,
-            L2BookParameters.NONE,
+            Integer.valueOf(BORSA_LEVELS),
             FeedMode.SEED_THEN_DELTA);
       case HYPERDASH:
         Map<String, String> headers = new LinkedHashMap<String, String>();
@@ -76,16 +76,11 @@ public final class SourceProfile {
             HyperliquidEnvironment.MAINNET,
             HYPERDASH_WEB_SOCKET_URI,
             headers,
-            HYPERDASH_PARAMETERS,
+            null,
             FeedMode.SNAPSHOT);
       default:
         return new SourceProfile(
-            source,
-            environment,
-            environment.webSocketUri(),
-            noHeaders,
-            L2BookParameters.NONE,
-            FeedMode.SNAPSHOT);
+            source, environment, environment.webSocketUri(), noHeaders, null, FeedMode.SNAPSHOT);
     }
   }
 
@@ -114,9 +109,9 @@ public final class SourceProfile {
     return handshakeHeaders;
   }
 
-  /** Returns the l2Book subscription parameters for this source. */
-  public L2BookParameters l2BookParameters() {
-    return l2BookParameters;
+  /** Returns the l2Book depth to request per side, or null when the source fixes it. */
+  public Integer nLevels() {
+    return nLevels;
   }
 
   /** Returns how this source delivers l2Book frames. */

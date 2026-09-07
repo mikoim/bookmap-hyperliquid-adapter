@@ -11,6 +11,7 @@ import com.bookmap.plugins.layer0.hyperliquid.MarketDataSource;
 import com.bookmap.plugins.layer0.hyperliquid.SourceProfile;
 import com.bookmap.plugins.layer0.hyperliquid.TestMetadata;
 import com.bookmap.plugins.layer0.hyperliquid.book.OrderBookSnapshotDiff;
+import com.bookmap.plugins.layer0.hyperliquid.book.PriceBucketer;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget.SubscriptionPermit;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.CancellableScheduler;
@@ -340,7 +341,8 @@ public class HyperliquidSessionSubscriptionTest {
             permit,
             10_000L,
             SourceProfile.FeedMode.SNAPSHOT,
-            L2BookParameters.NONE);
+            L2BookParameters.NONE,
+            PriceBucketer.identity(instrument));
     record.transitionToActive();
     record.beginGeneration(7L);
     OrderBookSnapshotDiff source = new OrderBookSnapshotDiff(instrument);

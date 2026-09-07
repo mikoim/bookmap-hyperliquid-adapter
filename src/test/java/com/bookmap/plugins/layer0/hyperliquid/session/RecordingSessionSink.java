@@ -2,6 +2,7 @@ package com.bookmap.plugins.layer0.hyperliquid.session;
 
 import com.bookmap.plugins.layer0.hyperliquid.model.DepthUpdate;
 import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -10,6 +11,7 @@ final class RecordingSessionSink implements SessionSink {
 
   private final List<String> events = new ArrayList<String>();
   private final List<String> addedAliases = new ArrayList<String>();
+  private final List<BigDecimal> addedTicks = new ArrayList<BigDecimal>();
   private final List<String> removedAliases = new ArrayList<String>();
   private final List<Trade> trades = new ArrayList<Trade>();
   private final List<String> systemMessages = new ArrayList<String>();
@@ -20,6 +22,10 @@ final class RecordingSessionSink implements SessionSink {
 
   List<String> addedAliases() {
     return addedAliases;
+  }
+
+  List<BigDecimal> addedTicks() {
+    return addedTicks;
   }
 
   List<String> removedAliases() {
@@ -40,8 +46,9 @@ final class RecordingSessionSink implements SessionSink {
   }
 
   @Override
-  public void onInstrumentAdded(PerpetualInstrument instrument) {
+  public void onInstrumentAdded(PerpetualInstrument instrument, BigDecimal tick) {
     addedAliases.add(instrument.symbol());
+    addedTicks.add(tick);
     events.add("instrument-added:" + instrument.symbol());
   }
 

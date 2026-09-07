@@ -453,7 +453,7 @@ public class ProviderEndToEndTest {
             .successfulSendBodies()
             .contains(
                 "{\"method\":\"subscribe\",\"subscription\":"
-                    + "{\"type\":\"l2Book\",\"coin\":\"BTC\"}}"));
+                    + "{\"type\":\"l2Book\",\"coin\":\"BTC\",\"nLevels\":400}}"));
 
     fixture.ack("BTC", "l2Book");
     fixture.ack("BTC", "trades");
@@ -479,7 +479,7 @@ public class ProviderEndToEndTest {
   }
 
   @Test
-  public void hyperdashLoginSendsHandshakeHeadersAndNSigFigsAndAcceptsEchoedAck() {
+  public void hyperdashLoginSendsHandshakeHeadersAndAcceptsEchoedAck() {
     Fixture fixture = new Fixture(budget(4, 20, 20, 4));
     fixture.loginWithSource("Hyperdash", false);
     fixture.subscribe("BTC");
@@ -496,11 +496,11 @@ public class ProviderEndToEndTest {
             .successfulSendBodies()
             .contains(
                 "{\"method\":\"subscribe\",\"subscription\":"
-                    + "{\"type\":\"l2Book\",\"coin\":\"BTC\",\"nSigFigs\":5}}"));
+                    + "{\"type\":\"l2Book\",\"coin\":\"BTC\"}}"));
 
     fixture.frame(
         "{\"channel\":\"subscriptionResponse\",\"data\":{\"method\":\"subscribe\","
-            + "\"subscription\":{\"type\":\"l2Book\",\"coin\":\"BTC\",\"nSigFigs\":5}}}");
+            + "\"subscription\":{\"type\":\"l2Book\",\"coin\":\"BTC\"}}}");
     fixture.ack("BTC", "trades");
     fixture.book("BTC", 1L, "100", "1", "101", "2");
     fixture.drain();
