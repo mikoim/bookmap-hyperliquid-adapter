@@ -21,16 +21,26 @@ The adapter supports the exact read-only perpetual scope exposed by Hyperliquid'
 - Borsa sends one full seed per connection followed by per-level deltas; the adapter folds the
   deltas locally and replaces the published book on every reconnect. Hyperdash sends full
   snapshots like Hyperliquid and requires browser-style handshake headers, which the adapter
-  adds automatically. Hyperdash is subscribed with `nSigFigs=5`, so its prices are aggregated to
-  five significant figures and its book is coarser than Hyperliquid's. The adapter does not
-  verify either relay against Hyperliquid itself.
+  adds automatically. All three sources are subscribed with the price aggregation (nSigFigs /
+  mantissa) that matches the Tick size chosen in Bookmap's Subscribe dialog; Borsa is
+  additionally asked for nLevels=400, Hyperliquid ignores nLevels, and Hyperdash rejects it. The
+  adapter does not verify either relay against Hyperliquid itself.
 - Only `PERPETUAL` subscriptions are accepted; Spot, history, account data, credentials, orders,
   and gap filling are not implemented.
 - Each subscription uses one `l2Book` feed and one `trades` feed on a single WebSocket. Hyperliquid
-  and Hyperdash snapshots carry at most 20 levels per side; Borsa deltas may add levels outside
-  that window. Trades received while disconnected can be missed.
-- `pips = 10^-(6-szDecimals)` is a lossless Bookmap display quantum for this market-data-only
-  adapter, not an asserted Hyperliquid order tick.
+  and Hyperdash snapshots carry at most 20 levels per side; Borsa serves up to 400 levels per side.
+  Coarser tick sizes therefore cover a wider price range with the same number of levels. Trades
+  received while disconnected can be missed.
+- The Tick size dropdown lists the ticks Hyperliquid's own order book offers for the instrument's
+  price magnitude (for HYPE near 88: 0.001, 0.002, 0.005, 0.01, 0.1, 1), derived from the mark
+  price loaded at login via `metaAndAssetCtxs`. The default is the finest tick the exchange
+  actually quotes at that magnitude. Books are kept on the lossless `10^-(6-szDecimals)` grid and
+  aggregated on publish (bids round down, asks round up, sizes summed), so a stale tick from a saved
+  workspace or a price that crosses a power of ten never corrupts the book; it only changes how many
+  levels the server-side window covers. Re-login to refresh the candidates after a large move.
+- The native grid 10^-(6-szDecimals) is the lossless internal price unit; the Bookmap pips of a
+  subscription is the tick chosen in the dialog, and trade prices are reported in units of that
+  tick (fractions allowed).
 - Metadata is validated as a complete universe before delisted instruments are filtered.
 
 The adapter has no trading, order, account, credential, or private-user-data behavior. Order APIs
@@ -66,7 +76,8 @@ all adapter providers in the same JVM. Another Bookmap JVM/process, or another a
 the same public IP, is invisible to this in-process budget; operators must retain external
 headroom for those consumers and for Hyperliquid's external limits.
 
-The adapter uses per-side 20-level aggregate snapshots. During a disconnect, reconnect and full
+The adapter uses per-side aggregate books of 20 levels (Hyperliquid, Hyperdash) or 400 levels
+(Borsa) at the requested aggregation. During a disconnect, reconnect and full
 resynchronization are attempted, but no historical gap fill is available and trades may be missed.
 Borsa deltas are not self-healing: a delta dropped as stale or invalid leaves the published book
 out of sync until the next reconnect, and a market-data queue overflow forces that reconnect so a
