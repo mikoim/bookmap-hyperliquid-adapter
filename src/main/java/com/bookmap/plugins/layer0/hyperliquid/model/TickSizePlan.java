@@ -19,7 +19,9 @@ public final class TickSizePlan {
   private static final int MIN_SIG_FIGS = 2;
   private static final int[] MANTISSAS = {1, 2, 5};
 
-  private TickSizePlan() {}
+  private TickSizePlan() {
+    // static utility
+  }
 
   /** Returns the finest quantum the exchange quotes near the reference price. */
   public static BigDecimal nativeQuantum(BigDecimal referencePrice, int priceDecimals) {

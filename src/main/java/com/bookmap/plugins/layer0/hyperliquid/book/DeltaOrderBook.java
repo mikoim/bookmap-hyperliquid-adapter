@@ -6,6 +6,7 @@ import com.bookmap.plugins.layer0.hyperliquid.model.DepthUpdate;
 import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.ValueConversionException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -179,11 +180,12 @@ public final class DeltaOrderBook {
 
   private int bucketTotal(TreeMap<Integer, Integer> nativeLevels, int bucket, boolean bid) {
     int[] range = bucketer.nativeRange(bucket, bid);
-    long total = 0L;
-    for (Integer size :
+    Collection<Integer> sizes =
         nativeLevels
             .subMap(Integer.valueOf(range[0]), true, Integer.valueOf(range[1]), true)
-            .values()) {
+            .values();
+    long total = 0L;
+    for (Integer size : sizes) {
       total += size.longValue();
     }
     return PriceBucketer.saturate(total);

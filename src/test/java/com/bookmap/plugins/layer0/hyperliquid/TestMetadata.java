@@ -6,7 +6,9 @@ import com.google.gson.JsonParser;
 /** Builds metaAndAssetCtxs responses for tests from a legacy universe object. */
 public final class TestMetadata {
 
-  private TestMetadata() {}
+  private TestMetadata() {
+    // static utility
+  }
 
   /** Returns a universe object listing the symbols with szDecimals 2. */
   public static String universe(String... symbols) {
