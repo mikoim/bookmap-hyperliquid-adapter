@@ -57,6 +57,26 @@ public class HyperliquidMetaParserTest {
     assertEquals("BTC", instruments.get(0).symbol());
   }
 
+  /**
+   * Zero perp dexes is never a real response, and letting it through would log in with an empty
+   * universe and then fail every subscription with an opaque "instrument not found".
+   */
+  @Test
+  public void rejectsAnEmptyRootArray() {
+    assertRejected("[]", "perp dex");
+  }
+
+  /** All entries delisted is a legitimate response and still logs in, with nothing to list. */
+  @Test
+  public void acceptsAResponseWhoseEntriesAreAllDelisted() throws Exception {
+    List<PerpetualInstrument> instruments =
+        parser.parseAllPerpMetas(
+            "[{\"universe\":[{\"name\":\"BTC\",\"szDecimals\":2,\"isDelisted\":true}]},"
+                + "{\"universe\":[]}]");
+
+    assertTrue(instruments.toString(), instruments.isEmpty());
+  }
+
   /** Names must be unique across every perp dex, not only inside one. */
   @Test
   public void rejectsDuplicateNamesAcrossPerpDexes() {

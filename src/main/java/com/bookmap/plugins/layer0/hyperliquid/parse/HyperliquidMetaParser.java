@@ -16,13 +16,20 @@ public final class HyperliquidMetaParser {
   /**
    * Parses an allPerpMetas response: one element per perp dex, each an object with a universe.
    * HIP-3 names arrive fully qualified as {@code dex:coin}, so no dex prefix is applied here.
-   * Delisted entries are filtered only after every entry has been validated.
+   * Delisted entries are filtered only after every entry has been validated. An empty root array is
+   * rejected; a response whose entries are all delisted yields an empty instrument list.
    */
   public List<PerpetualInstrument> parseAllPerpMetas(String json) throws ProtocolException {
     try {
       JsonElement root = new JsonParser().parse(json);
       if (root == null || !root.isJsonArray()) {
         throw new ProtocolException("allPerpMetas response must be an array");
+      }
+      // Zero perp dexes would log in with an empty universe and then fail every subscription with
+      // an opaque "instrument not found"; reject it here instead. An all-delisted response is a
+      // legitimate result and still succeeds.
+      if (root.getAsJsonArray().size() == 0) {
+        throw new ProtocolException("allPerpMetas response must contain at least one perp dex");
       }
       List<MetadataEntry> entries = new ArrayList<MetadataEntry>();
       Set<String> names = new HashSet<String>();

@@ -36,14 +36,13 @@ perp dex:
   Coarser tick sizes therefore cover a wider price range with the same number of levels. Trades
   received while disconnected can be missed.
 - The Tick size dropdown lists the ticks Hyperliquid's own order book offers for the instrument's
-  price magnitude (for HYPE near 88: 0.001, 0.002, 0.005, 0.01, 0.1, 1), derived from the mark
-  price delivered continuously on the `fastAssetCtxs` WebSocket feed; metadata itself is loaded
-  once via a single `allPerpMetas` request. The default is the finest tick the exchange actually
-  quotes at that magnitude. Books are kept on the lossless `10^-(6-szDecimals)` grid and aggregated
-  on publish (bids round down, asks round up, sizes summed), so a stale tick from a saved workspace
-  or a price that crosses a power of ten never corrupts the book; it only changes how many levels
-  the server-side window covers. Mark prices are refreshed from the live feed, so the candidates
-  follow the market without re-login.
+  price magnitude (for HYPE near 88: 0.001, 0.002, 0.005, 0.01, 0.1, 1), derived from that mark
+  price. The default is the finest tick the exchange actually quotes at that magnitude. Books are
+  kept on the lossless `10^-(6-szDecimals)` grid and aggregated on publish (bids round down, asks
+  round up, sizes summed), so a stale tick from a saved workspace or a price that crosses a power
+  of ten never corrupts the book; it only changes how many levels the server-side window covers.
+  Mark prices are refreshed from the live feed, so the candidates follow the market without
+  re-login.
 - The native grid 10^-(6-szDecimals) is the lossless internal price unit; the Bookmap pips of a
   subscription is the tick chosen in the dialog, and trade prices are reported in units of that
   tick (fractions allowed).

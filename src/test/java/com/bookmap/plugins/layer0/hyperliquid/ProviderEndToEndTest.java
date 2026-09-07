@@ -47,6 +47,7 @@ public class ProviderEndToEndTest {
   public void mainnetLifecyclePublishesBookAndTradeThenClosesCleanly() {
     Fixture fixture = new Fixture(budget(4, 20, 20, 4));
     fixture.login(HyperliquidEnvironment.MAINNET);
+    fixture.endAssetContextWait();
     fixture.subscribe("BTC");
     fixture.completeSends();
     fixture.ack("BTC", "l2Book");
@@ -454,6 +455,7 @@ public class ProviderEndToEndTest {
   public void borsaLoginUsesMainnetMetadataAndPublishesSeedThenDelta() {
     Fixture fixture = new Fixture(budget(4, 20, 20, 4));
     fixture.loginWithSource("Borsa", true);
+    fixture.endAssetContextWait();
     fixture.subscribe("BTC");
     fixture.completeSends();
 
@@ -496,6 +498,7 @@ public class ProviderEndToEndTest {
   public void hyperdashLoginSendsHandshakeHeadersAndAcceptsEchoedAck() {
     Fixture fixture = new Fixture(budget(4, 20, 20, 4));
     fixture.loginWithSource("Hyperdash", false);
+    fixture.endAssetContextWait();
     fixture.subscribe("BTC");
     fixture.completeSends();
 
@@ -843,6 +846,14 @@ public class ProviderEndToEndTest {
       transport.emitTextFromConnection(
           marketDataConnection(),
           "{\"channel\":\"error\",\"data\":{\"message\":\"bad\"" + target + "}}");
+    }
+
+    /**
+     * Ends the session's brief wait for a first mark price. These fixtures never open the feed
+     * connection, so login arrives on the timeout, exactly as it does when a feed is rejected.
+     */
+    private void endAssetContextWait() {
+      advance(2_000L);
     }
 
     private void advance(long elapsed) {

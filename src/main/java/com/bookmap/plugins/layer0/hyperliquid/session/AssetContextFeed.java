@@ -105,6 +105,10 @@ final class AssetContextFeed implements HyperliquidConnector.Listener, AutoClose
         connector.acceptPong(generation);
       } else if (event.kind() == ControlEvent.Kind.ASSET_CONTEXTS) {
         submit(generation, event.markPrices());
+      } else if (event.kind() == ControlEvent.Kind.SUBSCRIPTION_ERROR) {
+        // A rejection here only freezes mark prices, so it stays a diagnostic and never reaches
+        // the market-data path's handleSubscriptionError, which treats an unknown target as fatal.
+        reportOnceOnStateLane("asset-context feed subscription rejected");
       }
     }
   }
@@ -132,6 +136,17 @@ final class AssetContextFeed implements HyperliquidConnector.Listener, AutoClose
             if (session.onAssetContexts(markPrices, snapshotPending)) {
               snapshotPending = false;
             }
+          }
+        });
+  }
+
+  /** Hands one incident report to the state lane, since onFrame runs on the callback thread. */
+  private void reportOnceOnStateLane(final String message) {
+    stateLane.accept(
+        new Runnable() {
+          @Override
+          public void run() {
+            reportOnce(message, null);
           }
         });
   }

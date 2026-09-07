@@ -108,6 +108,59 @@ public class HyperliquidSessionAssetContextTest {
     assertEquals(1, fixture.sink.knownInstrumentPublications());
   }
 
+  /**
+   * Login waits for the first snapshot, because Bookmap re-subscribes a saved workspace as soon as
+   * login succeeds and a subscription made without a reference price keeps its coarse server-side
+   * grouping for the whole session.
+   */
+  @Test
+  public void loginWaitsForTheFirstAssetContextSnapshot() {
+    Fixture fixture = new Fixture();
+    assertEquals(0, countEvents(fixture.sink.events(), "login-successful"));
+
+    fixture.receive(TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"87.785\"}}"));
+
+    assertEquals(1, countEvents(fixture.sink.events(), "login-successful"));
+  }
+
+  /** A rejected, broken, or merely slow feed must never keep the user from logging in. */
+  @Test
+  public void loginStillSucceedsWhenNoAssetContextEverArrives() {
+    Fixture fixture = new Fixture();
+
+    fixture.advance(1_999L);
+    assertEquals(0, countEvents(fixture.sink.events(), "login-successful"));
+
+    fixture.advance(1L);
+    assertEquals(1, countEvents(fixture.sink.events(), "login-successful"));
+  }
+
+  /** The snapshot and the timeout are two paths to one report, never two. */
+  @Test
+  public void loginIsReportedExactlyOnce() {
+    Fixture fixture = new Fixture();
+
+    fixture.receive(TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"87.785\"}}"));
+    fixture.advance(60_000L);
+    fixture.receive(TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"88.5\"}}"));
+
+    assertEquals(1, countEvents(fixture.sink.events(), "login-successful"));
+  }
+
+  /** Only the initial connection reports login; a reconnect keeps its own restore path. */
+  @Test
+  public void reconnectDoesNotReportLoginAgain() {
+    Fixture fixture = new Fixture();
+    fixture.receive(TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"87.785\"}}"));
+
+    fixture.reconnect();
+    fixture.receiveOnGeneration(
+        2L, TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"88.5\"}}"));
+    fixture.advance(60_000L);
+
+    assertEquals(1, countEvents(fixture.sink.events(), "login-successful"));
+  }
+
   /** RecordingSessionSink appends the failure reason, so events are matched by prefix. */
   private static boolean hasEvent(List<String> events, String prefix) {
     for (String event : events) {
@@ -116,6 +169,16 @@ public class HyperliquidSessionAssetContextTest {
       }
     }
     return false;
+  }
+
+  private static int countEvents(List<String> events, String prefix) {
+    int count = 0;
+    for (String event : events) {
+      if (event.startsWith(prefix)) {
+        count++;
+      }
+    }
+    return count;
   }
 
   private static final class Fixture {
@@ -172,12 +235,16 @@ public class HyperliquidSessionAssetContextTest {
       drain();
     }
 
+    void advance(long elapsedMillis) {
+      clock.now += elapsedMillis;
+      scheduler.advanceBy(elapsedMillis);
+      drain();
+    }
+
     void reconnect() {
       transport.remoteClose(1006, "lost");
       drain();
-      clock.now += 1_000L;
-      scheduler.advanceBy(1_000L);
-      drain();
+      advance(1_000L);
       transport.openSocket();
       drain();
       transport.socket().succeedNextSend();
@@ -240,9 +307,8 @@ public class HyperliquidSessionAssetContextTest {
       return scheduled;
     }
 
-    void advanceBy(long elapsedMillis) {
-      long deadline = clock.now + elapsedMillis;
-      while (!tasks.isEmpty() && tasks.peek().due <= deadline) {
+    void advanceBy(long elapsed) {
+      while (!tasks.isEmpty() && tasks.peek().due <= clock.now) {
         Task due = tasks.poll();
         if (!due.cancelled) {
           due.task.run();

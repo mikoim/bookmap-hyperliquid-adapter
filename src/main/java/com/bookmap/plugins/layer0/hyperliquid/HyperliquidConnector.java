@@ -896,6 +896,7 @@ public final class HyperliquidConnector implements AutoCloseable {
     return profile != null && profile.source() == MarketDataSource.HYPERLIQUID;
   }
 
+  /** Each desired subscription, plus one ping's headroom, plus the feed frame where it is sent. */
   private int reservedFrameCount() {
     return desired.size() + (sendsAssetContextFeed() ? 2 : 1);
   }

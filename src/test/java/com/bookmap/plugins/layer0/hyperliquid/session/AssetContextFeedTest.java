@@ -37,6 +37,9 @@ public class AssetContextFeedTest {
     assertEquals(URI.create("wss://ws.borsa.cc/"), fixture.transport.connectCalls().get(0));
     assertEquals(
         URI.create("wss://api.hyperliquid.xyz/ws"), fixture.transport.connectCalls().get(1));
+    // Both connectors start the transport they share, which HyperliquidTransport.start() must
+    // tolerate; that contract is otherwise only stated in Javadoc.
+    assertEquals(2, fixture.transport.startCount());
     assertTrue(
         fixture.transport.socket().successfulSendBodies().toString(),
         fixture
@@ -235,6 +238,47 @@ public class AssetContextFeedTest {
     assertEquals(connectionsAfterRetry, fixture.transport.connectCalls().size());
   }
 
+  /**
+   * A subscription error reaching the feed is reported as a diagnostic and never as the market-data
+   * path's fatal unknown-target stop, and one incident still yields one report.
+   */
+  @Test
+  public void feedSubscriptionErrorIsOnlyADiagnostic() {
+    Fixture fixture = new Fixture(MarketDataSource.BORSA);
+    String rejection = "{\"channel\":\"error\",\"data\":{\"message\":\"bad\"}}";
+
+    fixture.transport.emitTextFromConnection(1, rejection);
+    fixture.transport.emitTextFromConnection(1, rejection);
+    fixture.drain();
+
+    assertEquals(
+        fixture.sink.events().toString(),
+        1,
+        countEvents(fixture.sink.events(), "diagnostic:asset-context feed subscription rejected"));
+    assertFalse(
+        fixture.sink.events().toString(), hasEvent(fixture.sink.events(), "connection-lost"));
+  }
+
+  /**
+   * A relay starts its feed while metadata is still being applied, so the first snapshot can land
+   * before the market-data socket opens. Login is then reported the moment that socket opens,
+   * without waiting the timeout out, and still exactly once.
+   */
+  @Test
+  public void loginIsReportedAtOnceWhenTheSnapshotPrecededTheSocket() {
+    Fixture fixture = new Fixture(MarketDataSource.BORSA, true, false);
+
+    fixture.transport.emitTextFromConnection(
+        1, TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"87.785\"}}"));
+    fixture.drain();
+    assertEquals(0, countEvents(fixture.sink.events(), "login-successful"));
+
+    fixture.openMarketDataConnection();
+
+    assertEquals(1, countEvents(fixture.sink.events(), "login-successful"));
+    assertEquals("87.785", fixture.sink.lastReferencePrice("HYPE"));
+  }
+
   /** The feed connector shuts its own connection down without closing the transport it borrows. */
   @Test
   public void feedConnectorDoesNotCloseTheSharedTransport() {
@@ -306,6 +350,7 @@ public class AssetContextFeedTest {
   }
 
   private static final class Fixture {
+    private static final int MARKET_DATA_CONNECTION = 0;
     private static final int FEED_CONNECTION = 1;
 
     private final ManualExecutor executor = new ManualExecutor();
@@ -328,10 +373,18 @@ public class AssetContextFeedTest {
     private HyperliquidConnector feedConnector;
 
     Fixture(MarketDataSource source) {
-      this(source, true);
+      this(source, true, true);
     }
 
     Fixture(MarketDataSource source, boolean openFeedConnection) {
+      this(source, openFeedConnection, true);
+    }
+
+    /**
+     * Leaving {@code openMarketDataConnection} false holds the market-data socket closed so a test
+     * can deliver mark prices first, the order a relay really produces.
+     */
+    Fixture(MarketDataSource source, boolean openFeedConnection, boolean openMarketDataConnection) {
       session =
           new HyperliquidSession(
               connector,
@@ -365,13 +418,24 @@ public class AssetContextFeedTest {
         if (!openFeedConnection && index == FEED_CONNECTION) {
           continue;
         }
-        transport.openConnection(index);
-        drain();
-        // Only a Hyperliquid connection subscribes to the feed, so a relay's index 0 sends nothing.
-        if (transport.socket().pendingSendCount() > 0) {
-          transport.socket().succeedNextSend();
-          drain();
+        if (!openMarketDataConnection && index == MARKET_DATA_CONNECTION) {
+          continue;
         }
+        open(index);
+      }
+    }
+
+    void openMarketDataConnection() {
+      open(MARKET_DATA_CONNECTION);
+    }
+
+    private void open(int index) {
+      transport.openConnection(index);
+      drain();
+      // Only a Hyperliquid connection subscribes to the feed, so a relay's index 0 sends nothing.
+      if (transport.socket().pendingSendCount() > 0) {
+        transport.socket().succeedNextSend();
+        drain();
       }
     }
 
@@ -411,9 +475,8 @@ public class AssetContextFeedTest {
       return scheduled;
     }
 
-    void advanceBy(long elapsedMillis) {
-      long deadline = clock.now + elapsedMillis;
-      while (!tasks.isEmpty() && tasks.peek().due <= deadline) {
+    void advanceBy(long elapsed) {
+      while (!tasks.isEmpty() && tasks.peek().due <= clock.now) {
         Task due = tasks.poll();
         if (!due.cancelled) {
           due.task.run();

@@ -26,6 +26,14 @@ import org.junit.Test;
 /** Tests the connector lifecycle and its owned outbound transport state. */
 public class HyperliquidConnectorTest {
 
+  /** The feed subscription's wire form is a protocol contract, so pin the literal, not the name. */
+  @Test
+  public void assetContextSubscribeFrameMatchesTheWireProtocol() {
+    assertEquals(
+        "{\"method\":\"subscribe\",\"subscription\":{\"type\":\"fastAssetCtxs\"}}",
+        HyperliquidConnector.ASSET_CONTEXTS_SUBSCRIBE_JSON);
+  }
+
   @Test
   public void startPostsMainnetMetadataBeforeOpeningTheWebSocket() {
     Fixture fixture = new Fixture();
