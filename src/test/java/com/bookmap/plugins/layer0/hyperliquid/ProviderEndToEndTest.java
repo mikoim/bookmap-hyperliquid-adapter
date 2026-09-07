@@ -33,6 +33,7 @@ import velox.api.layer1.data.LoginData;
 import velox.api.layer1.data.OrderSendParameters;
 import velox.api.layer1.data.OrderUpdateParameters;
 import velox.api.layer1.data.SubscribeInfo;
+import velox.api.layer1.data.SubscribeInfoCrypto;
 import velox.api.layer1.data.SystemTextMessageType;
 import velox.api.layer1.data.TradeInfo;
 
@@ -512,6 +513,35 @@ public class ProviderEndToEndTest {
     fixture.assertClosed();
   }
 
+  @Test
+  public void coarseTickAggregatesTheBookAndScalesTradesThroughBookmapListeners() {
+    Fixture fixture = new Fixture(budget(4, 20, 20, 4));
+    fixture.loginWithPricedMetadata("HYPE", "87.785");
+    fixture.provider.subscribe(new SubscribeInfoCrypto("HYPE", "", "PERPETUAL", 0.01d, 100d));
+    fixture.drain();
+    fixture.completeSends();
+    assertTrue(
+        fixture.transport.socket().successfulSendBodies().toString().contains("\"nSigFigs\":4"));
+    fixture.ack("HYPE", "l2Book");
+    fixture.ack("HYPE", "trades");
+    fixture.frame(
+        "{\"channel\":\"l2Book\",\"data\":{\"coin\":\"HYPE\",\"time\":1,\"levels\":[["
+            + "{\"px\":\"87.784\",\"sz\":\"2.36\"},{\"px\":\"87.783\",\"sz\":\"1.32\"}],["
+            + "{\"px\":\"87.785\",\"sz\":\"161.16\"}]]}}");
+    fixture.trade("HYPE", "B", "87.784", "1", 2L, 7L);
+    fixture.drain();
+
+    assertEquals(
+        Arrays.asList(
+            "login",
+            "added:HYPE",
+            "depth:HYPE:8778:368",
+            "depth:HYPE:8779:16116",
+            "trade:HYPE:8778"),
+        fixture.trace);
+    assertEquals(0.01d, fixture.instruments.lastInfo.pips, 0d);
+  }
+
   private static HyperliquidProcessBudget budget(
       int connections, int attempts, int frames, int subscriptions) {
     try {
@@ -615,6 +645,15 @@ public class ProviderEndToEndTest {
           environment == HyperliquidEnvironment.TESTNET ? testnetLogin() : mainnetLogin());
       drain();
       transport.completeMeta(200, metadata(symbols));
+      drain();
+      transport.openSocket();
+      drain();
+    }
+
+    private void loginWithPricedMetadata(String symbol, String markPx) {
+      provider.login(mainnetLogin());
+      drain();
+      transport.completeMeta(200, metadata(new String[] {symbol}, markPx));
       drain();
       transport.openSocket();
       drain();
@@ -818,6 +857,10 @@ public class ProviderEndToEndTest {
     return TestMetadata.wrap(TestMetadata.universe(symbols));
   }
 
+  private static String metadata(String[] symbols, String... markPxs) {
+    return TestMetadata.wrap(TestMetadata.universe(symbols), markPxs);
+  }
+
   private static final class Clock implements LongSupplier {
     private long now;
 
@@ -888,6 +931,7 @@ public class ProviderEndToEndTest {
     private final List<String> trace;
     private final List<String> added = new ArrayList<String>();
     private final List<String> removed = new ArrayList<String>();
+    private velox.api.layer1.data.InstrumentInfo lastInfo;
 
     private RecordingInstrument(List<String> trace) {
       this.trace = trace;
@@ -896,6 +940,7 @@ public class ProviderEndToEndTest {
     @Override
     public void onInstrumentAdded(String alias, velox.api.layer1.data.InstrumentInfo info) {
       added.add(alias);
+      lastInfo = info;
       trace.add("added:" + alias);
     }
 

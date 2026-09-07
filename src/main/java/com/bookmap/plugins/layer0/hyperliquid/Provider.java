@@ -5,6 +5,7 @@ import com.bookmap.plugins.layer0.hyperliquid.concurrent.ExecutorScheduler;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.StateEventDispatcher;
 import com.bookmap.plugins.layer0.hyperliquid.model.DepthUpdate;
 import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
+import com.bookmap.plugins.layer0.hyperliquid.model.TickSizePlan;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMessageParser;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMetaParser;
 import com.bookmap.plugins.layer0.hyperliquid.session.ConnectionFailure;
@@ -47,6 +48,7 @@ import velox.api.layer1.data.LoginFailedReason;
 import velox.api.layer1.data.OrderSendParameters;
 import velox.api.layer1.data.OrderUpdateParameters;
 import velox.api.layer1.data.SubscribeInfo;
+import velox.api.layer1.data.SubscribeInfoCrypto;
 import velox.api.layer1.data.SystemTextMessageType;
 import velox.api.layer1.data.TradeInfo;
 
@@ -89,9 +91,37 @@ public final class Provider extends ExternalLiveBaseProvider {
 
   @Override
   public void subscribe(SubscribeInfo subscribeInfo) {
-    if (subscribeInfo != null) {
-      session.subscribe(subscribeInfo.symbol, subscribeInfo.exchange, subscribeInfo.type);
+    if (subscribeInfo == null) {
+      return;
     }
+    session.subscribe(
+        subscribeInfo.symbol, subscribeInfo.exchange, subscribeInfo.type, tickFor(subscribeInfo));
+  }
+
+  /** Resolves the dialog's tick; unsupported values fall back to the instrument's default tick. */
+  private BigDecimal tickFor(SubscribeInfo subscribeInfo) {
+    PerpetualInstrument instrument = instrumentFor(subscribeInfo);
+    if (instrument == null) {
+      return null;
+    }
+    BigDecimal defaultTick =
+        TickSizePlan.defaultTick(instrument.referencePrice(), instrument.priceDecimals());
+    if (!(subscribeInfo instanceof SubscribeInfoCrypto)) {
+      return defaultTick;
+    }
+    double pips = ((SubscribeInfoCrypto) subscribeInfo).pips;
+    BigDecimal requested = Double.isFinite(pips) && pips > 0d ? BigDecimal.valueOf(pips) : null;
+    if (requested != null && TickSizePlan.isSupportedTick(requested, instrument.priceDecimals())) {
+      return requested;
+    }
+    Log.warn(
+        "Unsupported tick size "
+            + pips
+            + " for "
+            + subscribeInfo.symbol
+            + "; using "
+            + defaultTick.toPlainString());
+    return defaultTick;
   }
 
   @Override
@@ -149,8 +179,16 @@ public final class Provider extends ExternalLiveBaseProvider {
 
   private DefaultAndList<Double> pipsFor(SubscribeInfo subscribeInfo) {
     PerpetualInstrument instrument = instrumentFor(subscribeInfo);
-    double pips = instrument == null ? FALLBACK_PIPS : instrument.pips();
-    return new DefaultAndList<Double>(Double.valueOf(pips), Collections.singletonList(pips));
+    if (instrument == null) {
+      return new DefaultAndList<Double>(
+          Double.valueOf(FALLBACK_PIPS), Collections.singletonList(Double.valueOf(FALLBACK_PIPS)));
+    }
+    List<Double> options = new ArrayList<Double>();
+    for (BigDecimal tick :
+        TickSizePlan.candidates(instrument.referencePrice(), instrument.priceDecimals())) {
+      options.add(Double.valueOf(tick.doubleValue()));
+    }
+    return new DefaultAndList<Double>(options.get(0), Collections.unmodifiableList(options));
   }
 
   private DefaultAndList<Double> sizeMultiplierFor(SubscribeInfo subscribeInfo) {

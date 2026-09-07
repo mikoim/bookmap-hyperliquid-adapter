@@ -38,6 +38,7 @@ import velox.api.layer1.data.LoginFailedReason;
 import velox.api.layer1.data.OrderSendParameters;
 import velox.api.layer1.data.OrderUpdateParameters;
 import velox.api.layer1.data.SubscribeInfo;
+import velox.api.layer1.data.SubscribeInfoCrypto;
 import velox.api.layer1.data.SystemTextMessageType;
 import velox.api.layer1.data.TradeInfo;
 
@@ -203,6 +204,59 @@ public class ProviderTest {
     assertEquals("Hyperliquid realtime", provider.getSource());
     factory.sink.onInstrumentRemoved("SOL");
     assertEquals(1, instruments.removedCount);
+  }
+
+  /** Prevents the subscribe dialog from losing tick candidates derived from the reference price. */
+  @Test
+  public void offersTickCandidatesDerivedFromTheReferencePrice() {
+    FakeSessionFactory factory = new FakeSessionFactory();
+    Provider provider = new Provider(factory);
+    factory.sink.onKnownInstruments(
+        Collections.singletonList(new PerpetualInstrument("HYPE", 2, new BigDecimal("87.785"))));
+
+    DefaultAndList<Double> pips =
+        provider
+            .getSupportedFeatures()
+            .pipsFunction
+            .apply(new SubscribeInfo("HYPE", "", "PERPETUAL"));
+
+    assertEquals(Double.valueOf(0.001d), pips.valueDefault);
+    assertEquals(Arrays.asList(0.001d, 0.002d, 0.005d, 0.01d, 0.1d, 1d), pips.valueOptions);
+  }
+
+  /** Prevents an unsupported or plain subscription from losing the chosen or default tick. */
+  @Test
+  public void passesTheChosenTickAndFallsBackForUnsupportedOrPlainSubscriptions() {
+    FakeSessionFactory factory = new FakeSessionFactory();
+    Provider provider = new Provider(factory);
+    factory.sink.onKnownInstruments(
+        Collections.singletonList(new PerpetualInstrument("HYPE", 2, new BigDecimal("87.785"))));
+
+    provider.subscribe(new SubscribeInfoCrypto("HYPE", "", "PERPETUAL", 0.01d, 100d));
+    assertEquals(0, new BigDecimal("0.01").compareTo(factory.session.lastTick));
+
+    provider.subscribe(new SubscribeInfoCrypto("HYPE", "", "PERPETUAL", 0.00005d, 100d));
+    assertEquals(0, new BigDecimal("0.001").compareTo(factory.session.lastTick));
+
+    provider.subscribe(new SubscribeInfo("HYPE", "", "PERPETUAL"));
+    assertEquals(0, new BigDecimal("0.001").compareTo(factory.session.lastTick));
+
+    provider.subscribe(new SubscribeInfoCrypto("UNKNOWN", "", "PERPETUAL", 0.01d, 100d));
+    assertNull(factory.session.lastTick);
+  }
+
+  /** Prevents the announced instrument and its price formatting from ignoring the chosen tick. */
+  @Test
+  public void instrumentInfoAndPriceFormattingUseTheChosenTick() {
+    FakeSessionFactory factory = new FakeSessionFactory();
+    Provider provider = new Provider(factory);
+    RecordingInstrumentListener instruments = new RecordingInstrumentListener();
+    provider.addListener(instruments);
+
+    factory.sink.onInstrumentAdded(new PerpetualInstrument("HYPE", 2), new BigDecimal("0.01"));
+
+    assertEquals(0.01d, instruments.instrument.pips, 0d);
+    assertEquals("87.78", provider.formatPrice("HYPE", 87.78d));
   }
 
   /** Prevents accidental order routing through a market-data-only adapter. */
