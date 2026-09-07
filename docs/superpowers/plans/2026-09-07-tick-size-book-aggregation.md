@@ -1161,7 +1161,12 @@ Add to `DeltaOrderBookTest` (reuse its `snapshot`, `levels`, `level`, `depth` he
     DeltaOrderBook.Result unchanged =
         coarse.applyDelta(snapshot(5L, levels(), levels(level("87.786", "1"))), true);
     assertTrue(unchanged.updates().isEmpty());
-    assertEquals(Arrays.asList(depth(false, 8779, 0)), coarse.clearPublished());
+
+    DeltaOrderBook.Result newBucket =
+        coarse.applyDelta(snapshot(6L, levels(), levels(level("87.795", "1"))), true);
+    assertEquals(Arrays.asList(depth(false, 8780, 100)), newBucket.updates());
+    assertEquals(
+        Arrays.asList(depth(false, 8779, 0), depth(false, 8780, 0)), coarse.clearPublished());
   }
 
   @Test
@@ -1407,6 +1412,7 @@ git commit -m "feat: publish seed-then-delta books as tick bucket totals"
 - Modify: `src/test/java/com/bookmap/plugins/layer0/hyperliquid/session/RecordingSessionSink.java`
 - Modify: `src/test/java/com/bookmap/plugins/layer0/hyperliquid/SourceProfileTest.java`
 - Modify: `src/test/java/com/bookmap/plugins/layer0/hyperliquid/ProviderTest.java` (only `FakeSession` gains the new overload so the build compiles; Provider logic changes in Task 8)
+- Modify: `src/test/java/com/bookmap/plugins/layer0/hyperliquid/session/HyperliquidSessionSubscriptionTest.java` (`recoveryCandidateDoesNotMutateLiveBookTimeOrBaseline` builds a `SubscriptionRecord` directly and must pass the new constructor argument)
 - Create: `src/test/java/com/bookmap/plugins/layer0/hyperliquid/session/HyperliquidSessionTickSizeTest.java`
 
 **Interfaces:**
@@ -1835,6 +1841,12 @@ Add `static final int BORSA_LEVELS = 400;` and use it. Update the class-level an
   }
 ```
 
+The six-argument constructor is removed, so the only other construction site,
+`HyperliquidSessionSubscriptionTest.recoveryCandidateDoesNotMutateLiveBookTimeOrBaseline`
+(around line 336), gains a seventh argument `PriceBucketer.identity(instrument)` after
+`L2BookParameters.NONE` (import `com.bookmap.plugins.layer0.hyperliquid.book.PriceBucketer`).
+Identity bucketing keeps that test's native-unit expectations unchanged.
+
 `HyperliquidSession`:
 
 ```java
@@ -1986,7 +1998,7 @@ Add to `ProviderTest`:
   }
 ```
 
-Imports: `java.math.BigDecimal`, `java.util.Arrays`, `velox.api.layer1.data.DefaultAndList`, `velox.api.layer1.data.SubscribeInfoCrypto`. `FakeSessionFactory` must expose its `FakeSession` as a field named `session` (add `final FakeSession session` if the factory currently creates it inline). `RecordingInstrumentListener.instrument` already exists.
+Imports to add: `java.math.BigDecimal` and `velox.api.layer1.data.SubscribeInfoCrypto` (`java.util.Arrays` and `velox.api.layer1.data.DefaultAndList` are already imported; a duplicate would trip checkstyle `RedundantImport`). `FakeSessionFactory` must expose its `FakeSession` as a field named `session` (add `final FakeSession session` if the factory currently creates it inline). `RecordingInstrumentListener.instrument` already exists.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
