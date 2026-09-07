@@ -184,8 +184,9 @@ public final class Provider extends ExternalLiveBaseProvider {
           Double.valueOf(FALLBACK_PIPS), Collections.singletonList(Double.valueOf(FALLBACK_PIPS)));
     }
     List<Double> options = new ArrayList<Double>();
-    for (BigDecimal tick :
-        TickSizePlan.candidates(instrument.referencePrice(), instrument.priceDecimals())) {
+    List<BigDecimal> candidates =
+        TickSizePlan.candidates(instrument.referencePrice(), instrument.priceDecimals());
+    for (BigDecimal tick : candidates) {
       options.add(Double.valueOf(tick.doubleValue()));
     }
     return new DefaultAndList<Double>(options.get(0), Collections.unmodifiableList(options));
