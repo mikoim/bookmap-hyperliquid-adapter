@@ -22,12 +22,12 @@ repositories {
 }
 
 dependencies {
-    compileOnly 'com.bookmap.api:api-core:7.4.0.10'
+    compileOnly 'com.bookmap.api:api-core:7.8.0.13'
     compileOnly 'com.google.code.gson:gson:2.4'
     compileOnly 'org.eclipse.jetty.aggregate:jetty-all:9.3.8.v20160314'
 
     testImplementation 'junit:junit:4.13.2'
-    testImplementation 'com.bookmap.api:api-core:7.4.0.10'
+    testImplementation 'com.bookmap.api:api-core:7.8.0.13'
     testImplementation 'com.google.code.gson:gson:2.4'
     testImplementation 'org.eclipse.jetty.aggregate:jetty-all:9.3.8.v20160314'
 }
