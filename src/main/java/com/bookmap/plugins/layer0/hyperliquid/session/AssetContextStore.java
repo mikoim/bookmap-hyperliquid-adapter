@@ -29,12 +29,14 @@ final class AssetContextStore {
 
   /** Merges a delta and returns the symbols whose mark price actually changed. */
   Set<String> applyDelta(Map<String, BigDecimal> delta) {
-    Set<String> changed = new HashSet<String>();
     for (Map.Entry<String, BigDecimal> entry : delta.entrySet()) {
       if (entry.getValue() == null) {
         throw new IllegalArgumentException(
             "mark price for symbol '" + entry.getKey() + "' cannot be null");
       }
+    }
+    Set<String> changed = new HashSet<String>();
+    for (Map.Entry<String, BigDecimal> entry : delta.entrySet()) {
       BigDecimal previous = markPrices.put(entry.getKey(), entry.getValue());
       if (previous == null || previous.compareTo(entry.getValue()) != 0) {
         changed.add(entry.getKey());

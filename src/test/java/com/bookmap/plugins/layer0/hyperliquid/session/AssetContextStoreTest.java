@@ -3,10 +3,10 @@ package com.bookmap.plugins.layer0.hyperliquid.session;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import java.math.BigDecimal;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -74,25 +74,44 @@ public class AssetContextStoreTest {
     assertTrue(store.applyDelta(prices("BTC", "92.50")).isEmpty());
   }
 
-  /** Snapshot with null value throws IllegalArgumentException. */
-  @Test(expected = IllegalArgumentException.class)
-  public void snapshotWithNullValueThrows() {
-    Map<String, BigDecimal> pricesWithNull = new HashMap<String, BigDecimal>();
-    pricesWithNull.put("BTC", new BigDecimal("79394.0"));
-    pricesWithNull.put("GONE", null);
-
-    store.applySnapshot(pricesWithNull);
-  }
-
-  /** Delta with null value throws IllegalArgumentException. */
-  @Test(expected = IllegalArgumentException.class)
-  public void deltaWithNullValueThrows() {
+  /** Snapshot with null value throws IllegalArgumentException and leaves store unchanged. */
+  @Test
+  public void snapshotWithNullValueThrowsAndLeavesStoreUnchanged() {
     store.applySnapshot(prices("BTC", "79394.0"));
 
-    Map<String, BigDecimal> deltaWithNull = new HashMap<String, BigDecimal>();
-    deltaWithNull.put("ETH", null);
+    Map<String, BigDecimal> snapshotWithNull = new LinkedHashMap<String, BigDecimal>();
+    snapshotWithNull.put("ETH", new BigDecimal("2000.0"));
+    snapshotWithNull.put("GONE", null);
 
-    store.applyDelta(deltaWithNull);
+    try {
+      store.applySnapshot(snapshotWithNull);
+      fail("Expected IllegalArgumentException for null mark price");
+    } catch (IllegalArgumentException e) {
+      assertTrue(e.getMessage().contains("GONE"));
+      assertEquals(0, new BigDecimal("79394.0").compareTo(store.markPrice("BTC")));
+      assertNull(store.markPrice("ETH"));
+      assertNull(store.markPrice("GONE"));
+    }
+  }
+
+  /** Delta with null value throws IllegalArgumentException and leaves store unchanged. */
+  @Test
+  public void deltaWithNullValueThrowsAndLeavesStoreUnchanged() {
+    store.applySnapshot(prices("BTC", "79394.0"));
+
+    Map<String, BigDecimal> deltaWithNull = new LinkedHashMap<String, BigDecimal>();
+    deltaWithNull.put("ETH", new BigDecimal("2000.0"));
+    deltaWithNull.put("XRP", null);
+
+    try {
+      store.applyDelta(deltaWithNull);
+      fail("Expected IllegalArgumentException for null mark price");
+    } catch (IllegalArgumentException e) {
+      assertTrue(e.getMessage().contains("XRP"));
+      assertEquals(0, new BigDecimal("79394.0").compareTo(store.markPrice("BTC")));
+      assertNull(store.markPrice("ETH"));
+      assertNull(store.markPrice("XRP"));
+    }
   }
 
   private static Map<String, BigDecimal> prices(String... symbolsAndPrices) {
