@@ -133,6 +133,71 @@ public class AssetContextFeedTest {
     assertEquals("87.785", fixture.sink.lastReferencePrice("HYPE"));
   }
 
+  /**
+   * A feed connection that fails before it ever opens is retried on the connector's standard
+   * backoff, and the retried connection carries mark prices normally. On the market-data path such
+   * a failure is fatal because it means login failed; for the feed it is only a diagnostic.
+   */
+  @Test
+  public void feedRetriesAConnectionThatNeverOpened() {
+    Fixture fixture = new Fixture(MarketDataSource.BORSA, false);
+
+    fixture.transport.failConnection(1, new IOException("feed unavailable"));
+    fixture.drain();
+    assertEquals(2, fixture.transport.connectCalls().size());
+
+    // advance() drains after the scheduler runs, so the retry body executes inside this call.
+    fixture.advance(1_000L);
+    assertEquals(3, fixture.transport.connectCalls().size());
+
+    fixture.transport.openConnection(2);
+    fixture.drain();
+    fixture.transport.socket().succeedNextSend();
+    fixture.drain();
+    fixture.transport.emitTextFromConnection(
+        2, TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"87.785\"}}"));
+    fixture.drain();
+
+    assertEquals("87.785", fixture.sink.lastReferencePrice("HYPE"));
+    assertEquals(
+        1, countEvents(fixture.sink.events(), "diagnostic:asset-context feed could not connect"));
+    assertFalse(fixture.sink.events().toString(), hasEvent(fixture.sink.events(), "login-failed"));
+    assertFalse(
+        fixture.sink.events().toString(), hasEvent(fixture.sink.events(), "connection-lost"));
+  }
+
+  /**
+   * A retried feed connection keeps its heartbeat indefinitely. The retry stays an <em>initial</em>
+   * attempt, so every send acquires its own frame; a reconnect attempt would instead draw on the
+   * connection permit's fixed reservation, which one subscribe and one ping exhaust, and the second
+   * heartbeat would tear the connection down and start it churning.
+   */
+  @Test
+  public void retriedFeedConnectionSurvivesRepeatedHeartbeats() {
+    Fixture fixture = new Fixture(MarketDataSource.BORSA, false);
+    fixture.transport.failConnection(1, new IOException("feed unavailable"));
+    fixture.drain();
+    fixture.advance(1_000L);
+    fixture.transport.openConnection(2);
+    fixture.drain();
+    fixture.transport.socket().succeedNextSend();
+    fixture.drain();
+    int connectionsAfterRetry = fixture.transport.connectCalls().size();
+
+    for (int cycle = 0; cycle < 3; cycle++) {
+      fixture.advance(30_000L);
+      while (fixture.transport.socket().pendingSendCount() > 0) {
+        fixture.transport.socket().succeedNextSend();
+        fixture.drain();
+      }
+      fixture.transport.emitTextFromConnection(0, "{\"channel\":\"pong\"}");
+      fixture.transport.emitTextFromConnection(2, "{\"channel\":\"pong\"}");
+      fixture.drain();
+    }
+
+    assertEquals(connectionsAfterRetry, fixture.transport.connectCalls().size());
+  }
+
   /** The feed connector shuts its own connection down without closing the transport it borrows. */
   @Test
   public void feedConnectorDoesNotCloseTheSharedTransport() {
@@ -177,6 +242,16 @@ public class AssetContextFeedTest {
     return false;
   }
 
+  private static int countEvents(List<String> events, String prefix) {
+    int count = 0;
+    for (String event : events) {
+      if (event.startsWith(prefix)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
   private static void noop() {
     // Intentionally empty.
   }
@@ -194,6 +269,8 @@ public class AssetContextFeedTest {
   }
 
   private static final class Fixture {
+    private static final int FEED_CONNECTION = 1;
+
     private final ManualExecutor executor = new ManualExecutor();
     private final MutableClock clock = new MutableClock();
     private final TestScheduler scheduler = new TestScheduler(clock);
@@ -214,6 +291,10 @@ public class AssetContextFeedTest {
     private HyperliquidConnector feedConnector;
 
     Fixture(MarketDataSource source) {
+      this(source, true);
+    }
+
+    Fixture(MarketDataSource source, boolean openFeedConnection) {
       session =
           new HyperliquidSession(
               connector,
@@ -244,6 +325,9 @@ public class AssetContextFeedTest {
       transport.completeMeta(200, TestMetadata.wrap(TestMetadata.universe("HYPE")));
       drain();
       for (int index = 0; index < transport.connectCalls().size(); index++) {
+        if (!openFeedConnection && index == FEED_CONNECTION) {
+          continue;
+        }
         transport.openConnection(index);
         drain();
         // Only a Hyperliquid connection subscribes to the feed, so a relay's index 0 sends nothing.

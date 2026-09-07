@@ -183,6 +183,27 @@ public final class HyperliquidConnector implements AutoCloseable {
         });
   }
 
+  /**
+   * Schedules another <em>initial</em> connection attempt on the standard reconnect backoff, after
+   * one that never opened. The asset-context feed uses this: its failures are diagnostics rather
+   * than login failures, so it keeps trying for the life of the session. The attempt stays initial
+   * so that each send acquires its own frame, the way the feed's first attempt does; a reconnect
+   * attempt instead draws on the connection permit's fixed reservation, which one subscribe and one
+   * ping exhaust.
+   */
+  public void retryAfterInitialFailure() {
+    stateSubmitter.accept(
+        new Runnable() {
+          @Override
+          public void run() {
+            if (closed || !started || generationActive || connectionRetry != null) {
+              return;
+            }
+            scheduleConnectionAttempt(true, clock.getAsLong() + nextReconnectDelayMillis());
+          }
+        });
+  }
+
   /** Adds a desired subscription and sends it before its activation deadline when possible. */
   public void subscribe(final SubscriptionKey key, final long activationDeadlineMillis) {
     stateSubmitter.accept(
@@ -779,8 +800,6 @@ public final class HyperliquidConnector implements AutoCloseable {
     if (closed || !started || connectionRetry != null) {
       return;
     }
-    int index = Math.min(reconnectAttempt, RECONNECT_DELAYS.length - 1);
-    reconnectAttempt++;
     connectionRetry =
         scheduleState(
             new Runnable() {
@@ -790,7 +809,14 @@ public final class HyperliquidConnector implements AutoCloseable {
                 attemptConnection(false);
               }
             },
-            RECONNECT_DELAYS[index]);
+            nextReconnectDelayMillis());
+  }
+
+  /** Returns the next backoff delay and advances the attempt counter. */
+  private long nextReconnectDelayMillis() {
+    int index = Math.min(reconnectAttempt, RECONNECT_DELAYS.length - 1);
+    reconnectAttempt++;
+    return RECONNECT_DELAYS[index];
   }
 
   private boolean isReconnectOpening() {

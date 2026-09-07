@@ -71,7 +71,13 @@ final class AssetContextFeed implements HyperliquidConnector.Listener, AutoClose
 
   @Override
   public void onInitialFailure(TransportFailure failure) {
+    if (closed) {
+      return;
+    }
+    // A connection that never opened is not fatal here, unlike on the market-data path where an
+    // initial failure means login failed; keep trying on the connector's own backoff.
     reportOnce("asset-context feed could not connect", failure);
+    connector.retryAfterInitialFailure();
   }
 
   @Override
