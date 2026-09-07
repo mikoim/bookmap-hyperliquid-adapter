@@ -64,7 +64,8 @@ Hyperliquid UI の HYPE ドロップダウン(0.001 / 0.002 / 0.005 / 0.01 / 0.1
 1. **内部の板はネイティブ格子で保持し、公開時に選択 Tick へ丸める。** ネイティブ格子とは
    `10^-(6-szDecimals)` 単位の int(現行 `PerpetualInstrument.toDepthPriceUnits` の結果)で、Hyperliquid
    の全価格を無損失で表現できる。公開時の丸めは bid 切り捨て・ask 切り上げ、同じ枠に落ちたサイズは合算
-   (サーバ集約と同じ規則)。
+   (サーバ集約と同じ規則)。合算後のサイズ単位が `Integer.MAX_VALUE` を超える場合は `Integer.MAX_VALUE`
+   に飽和させる(単一レベルに対する現行 `toSizeUnits` の飽和規則を枠合計にも適用する)。
 2. **サーバ側グルーピングは深さの最適化にすぎず、正しさには関与しない。** サーバの刻みが Tick より粗ければ
    各レベルはそのまま 1 枠に写り、細かければ合算される。どちらでも板は正しい。
 3. **Tick 候補とサーバパラメータの決定は純粋関数に閉じ込める。** 入力は参照価格・`priceDecimals`・
@@ -80,7 +81,9 @@ Hyperliquid UI の HYPE ドロップダウン(0.001 / 0.002 / 0.005 / 0.01 / 0.1
   - `referencePrice` が null または非正のときは `[10^-priceDecimals]`(現行と同じ 1 候補)
   - 例: HYPE(87.8, `priceDecimals=4`)→ `0.001, 0.002, 0.005, 0.01, 0.1, 1`。
     ETH(2519, `priceDecimals=2`)→ `0.1, 0.2, 0.5, 1, 10, 100`。
-    BTC(80203, `priceDecimals=1`)→ `1, 10, 20, 50, 100, 1000, 10000`。
+    BTC(80203, `priceDecimals=1`、`d=5`)→ `1, 2, 5, 10, 100, 1000`。
+    BTC が 6 桁のとき(112345, `priceDecimals=1`、`d=6`)→ `1, 10, 20, 50, 100, 1000, 10000`
+    (`q_native=1` は `min(10^(d-5), 1)` により整数価格として残る)。
     低価格銘柄(0.0012345, `priceDecimals=6`)→ `0.000001, 0.00001, 0.0001`
 - `static BigDecimal defaultTick(BigDecimal referencePrice, int priceDecimals)` — `candidates` の先頭
 - `static L2BookParameters parametersFor(BigDecimal tick, BigDecimal referencePrice, int priceDecimals, Integer nLevels)`
@@ -96,13 +99,16 @@ Hyperliquid UI の HYPE ドロップダウン(0.001 / 0.002 / 0.005 / 0.01 / 0.1
 - コンストラクタ `PriceBucketer(PerpetualInstrument instrument, BigDecimal tick)`。`tick` はネイティブ格子の
   整数倍でなければならない(`ratio = tick / 10^-priceDecimals` を正の整数として保持)
 - `int bidBucket(int nativeUnits)` = `floorDiv(nativeUnits, ratio)`、
-  `int askBucket(int nativeUnits)` = `ceilDiv(nativeUnits, ratio)`
+  `int askBucket(int nativeUnits)` = `ceilDiv(nativeUnits, ratio)`。どちらも `long` で計算する
+  (`ceilDiv` の加算が `int` を溢れないように)。結果は `nativeUnits` 以下なので `int` に収まる
 - `int[] nativeRange(int bucket, boolean bid)` — その枠に属するネイティブ単位の閉区間。
   bid: `[bucket×ratio, (bucket+1)×ratio - 1]`、ask: `[(bucket-1)×ratio + 1, bucket×ratio]`
-- `double tradePriceUnits(BigDecimal price) throws ValueConversionException` = `price / tick` を
-  `BigDecimal` で正確に割って double 化。`tick = m×10^k`(`m ∈ {1,2,5}`)なので割り切れる。端数は許容する
-  (Bookmap の trade 価格は double)。null・非正は `NON_POSITIVE`、`2^53` 超は `TRADE_PRICE_OUT_OF_RANGE`
-  で失敗し、現行 `toTradePriceUnits` と同じ例外契約を保つ
+- `double tradePriceUnits(BigDecimal price) throws ValueConversionException` =
+  `instrument.toTradePriceUnits(price) / ratio`(double 除算)。ネイティブ単位への変換は現行のままなので、
+  例外契約(null・非正は `NON_POSITIVE`、ネイティブ格子に乗らない価格は `NON_INTEGRAL`、ネイティブ単位が
+  `2^53` 超は `TRADE_PRICE_OUT_OF_RANGE`)は現行 `toTradePriceUnits` と完全に同じ。`ratio > 1` のとき結果は
+  端数を持ち得る(例: HYPE、tick 0.002 で `87.9065 → 879065 / 20 = 43953.25`)。Bookmap の trade 価格は
+  double なので端数は許容する
 - `ratio` は `long` で計算し、`Integer.MAX_VALUE` を超える Tick は不正として拒否する
   (`IllegalArgumentException`。`Provider` が事前に検証するため通常は到達しない)
 - `ratio == 1` のとき丸めは恒等写像となり、現行の挙動と一致する
@@ -121,8 +127,8 @@ Hyperliquid UI の HYPE ドロップダウン(0.001 / 0.002 / 0.005 / 0.01 / 0.1
 | `SourceProfile` | `l2BookParameters()` を廃止し、代わりに `Integer nLevels()`(Borsa: 400、他: null)を提供。Hyperdash の固定 `nSigFigs: 5` を撤廃 |
 | `HyperliquidSessionApi` / `HyperliquidSession.subscribe` | 引数に `BigDecimal tick` を追加。`TickSizePlan.parametersFor` で `L2BookParameters` を決め、`SubscriptionRecord` に `PriceBucketer` を渡す |
 | `SubscriptionRecord` | `PriceBucketer` を保持し、`OrderBookSnapshotDiff` / `DeltaOrderBook` に渡す |
-| `OrderBookSnapshotDiff` | 正規化はネイティブ単位のまま(重複価格の検出も現行どおり)。差分計算の前に `PriceBucketer` で枠へ合算し、枠単位の `DepthUpdate` を出す。ベースラインも枠単位で保持 |
-| `DeltaOrderBook` | ステージ済み/公開済みの板をネイティブ単位で保持するのは現行どおり。公開済み板の枠合計を別途保持し、差分適用時は影響した枠の合計を `nativeRange` で再計算して枠単位の `DepthUpdate` を出す。`publishStaged` / `replacePublished` / `clearPublished` も枠単位で出す |
+| `OrderBookSnapshotDiff` | 正規化はネイティブ単位のまま(重複価格の検出も現行どおり)。差分計算の前に `PriceBucketer` で枠へ合算し、枠単位の `DepthUpdate` を出す。枠のサイズは `BigDecimal` で合算してから `toSizeUnits` で変換する(飽和は現行どおり)。ベースラインも枠単位で保持 |
+| `DeltaOrderBook` | ステージ済み/公開済みの板をネイティブ単位で保持するのは現行どおり。公開済み板の枠合計を別途保持し、差分適用時は影響した枠の合計を `nativeRange` で再計算して枠単位の `DepthUpdate` を出す。枠合計は `long` で加算し `Integer.MAX_VALUE` で飽和させる。`publishStaged` / `replacePublished` / `clearPublished` も枠単位で出す |
 | `HyperliquidSession.convertTrade` | `record.instrument().toTradePriceUnits` を `record.bucketer().tradePriceUnits` に置き換え |
 | `SessionSink.onInstrumentAdded` | 引数を `(PerpetualInstrument instrument, BigDecimal tick)` に変更 |
 | `Provider.pipsFor` | `TickSizePlan.candidates` / `defaultTick` を `DefaultAndList<Double>` で返す |
@@ -194,10 +200,12 @@ Hyperliquid UI の HYPE ドロップダウン(0.001 / 0.002 / 0.005 / 0.01 / 0.1
   (省略、`5`、`5+mantissa`、`4`〜`2`、割り切れない Tick、参照価格なし、`nLevels` 付き)。
   桁またぎと古い Tick(HYPE に 0.0001)でも例外を出さないこと
 - `PriceBucketerTest`: `ratio=1` の恒等性、bid/ask の丸め方向、`nativeRange`、`tradePriceUnits` の正確性
-  (`87.9065 / 0.002 = 43953.25`)
+  (`87.9065 / 0.002 = 43953.25`)と例外契約(非正、ネイティブ格子外、範囲外)、`Integer.MAX_VALUE`
+  付近のネイティブ単位で `askBucket` が溢れないこと
 - `OrderBookSnapshotDiffTest`: 実測値(bid 87.784/87.783 → 87.78 = 3.68、ask 87.785/87.786/87.789 → 87.79 = 202.34)
   と一致すること。枠の消滅で削除が出ること
-- `DeltaOrderBookTest`: 差分で枠合計が増減・消滅するケース。窓外価格の差分が新しい枠を作るケース
+- `DeltaOrderBookTest`: 差分で枠合計が増減・消滅するケース。窓外価格の差分が新しい枠を作るケース。
+  枠合計が `Integer.MAX_VALUE` で飽和すること(`OrderBookSnapshotDiffTest` にも同じ飽和ケース)
 - `HyperliquidMetaParserTest`: 2 要素配列の受理、長さ不一致の拒否、`markPx` 欠落時の null
 - `ProviderTest`: `pipsFor` の候補と既定値、`SubscribeInfoCrypto.pips` の受け渡し、不正 Tick のフォールバック、
   `InstrumentInfo.pips` が選択 Tick になること
