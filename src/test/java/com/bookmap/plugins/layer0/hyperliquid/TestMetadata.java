@@ -2,12 +2,38 @@ package com.bookmap.plugins.layer0.hyperliquid;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.zip.Deflater;
 
 /** Builds metaAndAssetCtxs responses for tests from a legacy universe object. */
 public final class TestMetadata {
 
   private TestMetadata() {
     // static utility
+  }
+
+  /** Wraps a mark-price object as a fastAssetCtxs frame with Hyperliquid's payload encoding. */
+  public static String assetContextsFrame(String markPriceJson) {
+    return "{\"channel\":\"fastAssetCtxs\",\"data\":\"" + deflateBase64(markPriceJson) + "\"}";
+  }
+
+  private static String deflateBase64(String text) {
+    Deflater deflater = new Deflater(Deflater.BEST_SPEED, true);
+    try {
+      byte[] input = text.getBytes(StandardCharsets.UTF_8);
+      deflater.setInput(input);
+      deflater.finish();
+      ByteArrayOutputStream out = new ByteArrayOutputStream(input.length / 2 + 64);
+      byte[] chunk = new byte[8192];
+      while (!deflater.finished()) {
+        out.write(chunk, 0, deflater.deflate(chunk));
+      }
+      return Base64.getEncoder().encodeToString(out.toByteArray());
+    } finally {
+      deflater.end();
+    }
   }
 
   /** Returns a universe object listing the symbols with szDecimals 2. */

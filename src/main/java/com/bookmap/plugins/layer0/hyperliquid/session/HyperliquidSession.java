@@ -49,6 +49,7 @@ public final class HyperliquidSession
   private static final long ACK_TIMEOUT_MILLIS = 10_000L;
   private static final int TRADE_DEDUPLICATION_CAPACITY = 10_000;
   private static final long TRADE_DEDUPLICATION_TTL_MILLIS = 600_000L;
+  private static final long ASSET_CONTEXT_REPUBLISH_INTERVAL_MILLIS = 5_000L;
 
   private final HyperliquidConnector connector;
   private final HyperliquidMessageParser parser;
@@ -60,6 +61,7 @@ public final class HyperliquidSession
   private final Runnable afterClose;
   private final BoundedTradeDeduplicator tradeDeduplicator =
       new BoundedTradeDeduplicator(TRADE_DEDUPLICATION_CAPACITY, TRADE_DEDUPLICATION_TTL_MILLIS);
+  private final AssetContextStore assetContexts = new AssetContextStore();
   private final Map<String, PerpetualInstrument> instruments =
       new TreeMap<String, PerpetualInstrument>();
   private final Map<String, SubscriptionRecord> records = new TreeMap<String, SubscriptionRecord>();
@@ -78,6 +80,9 @@ public final class HyperliquidSession
   private boolean restoreNotifiedForIncident;
   private boolean recovering;
   private boolean generationInvalidated;
+  private boolean assetContextSnapshotPending;
+  private boolean assetContextPublished;
+  private long lastAssetContextPublishMillis;
   private ConnectionState connectionState = ConnectionState.STARTING;
   private long currentGeneration = -1L;
   private SourceProfile profile;
@@ -238,6 +243,7 @@ public final class HyperliquidSession
     boolean reconnecting = connectedOnce;
     currentGeneration = generation;
     generationInvalidated = false;
+    assetContextSnapshotPending = true;
     dispatcher.resetOverflowSignal();
     for (SubscriptionRecord record : records.values()) {
       record.beginGeneration(generation);
@@ -452,8 +458,54 @@ public final class HyperliquidSession
         handleAcknowledgement(generation, event.target());
       } else if (event.kind() == ControlEvent.Kind.SUBSCRIPTION_ERROR) {
         handleSubscriptionError(event.target());
+      } else if (event.kind() == ControlEvent.Kind.ASSET_CONTEXTS) {
+        boolean snapshot = assetContextSnapshotPending;
+        assetContextSnapshotPending = false;
+        onAssetContexts(event.markPrices(), snapshot);
       }
     }
+  }
+
+  /**
+   * Applies decoded mark prices and refreshes the known-instrument list. Callers must already run
+   * on the state lane; the Hyperliquid source enters through {@link #handleControls} and a relay
+   * enters through its dedicated asset-context feed.
+   */
+  void onAssetContexts(Map<String, BigDecimal> markPrices, boolean snapshot) {
+    if (closed || !metadataReceived) {
+      return;
+    }
+    if (snapshot) {
+      assetContexts.applySnapshot(markPrices);
+    } else if (!shouldRepublish(assetContexts.applyDelta(markPrices))) {
+      return;
+    }
+    assetContextPublished = true;
+    lastAssetContextPublishMillis = clock.getAsLong();
+    for (Map.Entry<String, PerpetualInstrument> entry : instruments.entrySet()) {
+      PerpetualInstrument current = entry.getValue();
+      entry.setValue(
+          new PerpetualInstrument(
+              current.symbol(), current.sizeDecimals(), assetContexts.markPrice(current.symbol())));
+    }
+    sink.onKnownInstruments(new ArrayList<PerpetualInstrument>(instruments.values()));
+  }
+
+  /** Rebuilds only when a listed instrument moved and the throttle window has elapsed. */
+  private boolean shouldRepublish(Set<String> changed) {
+    boolean touchesKnownInstrument = false;
+    for (String symbol : changed) {
+      if (instruments.containsKey(symbol)) {
+        touchesKnownInstrument = true;
+        break;
+      }
+    }
+    if (!touchesKnownInstrument) {
+      return false;
+    }
+    return !assetContextPublished
+        || clock.getAsLong() - lastAssetContextPublishMillis
+            >= ASSET_CONTEXT_REPUBLISH_INTERVAL_MILLIS;
   }
 
   private void handleAcknowledgement(long generation, SubscriptionKey key) {
