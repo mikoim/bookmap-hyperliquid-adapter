@@ -1,6 +1,7 @@
 package com.bookmap.plugins.layer0.hyperliquid.model;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -77,6 +78,17 @@ public class PerpetualInstrumentTest {
     } catch (ValueConversionException expected) {
       assertEquals(ValueConversionException.Reason.NON_POSITIVE, expected.reason());
     }
+  }
+
+  /** Keeps a positive mark price as the reference price and drops anything else. */
+  @Test
+  public void keepsPositiveReferencePriceAndDropsOthers() {
+    assertEquals(
+        new BigDecimal("87.785"),
+        new PerpetualInstrument("HYPE", 2, new BigDecimal("87.785")).referencePrice());
+    assertNull(new PerpetualInstrument("HYPE", 2).referencePrice());
+    assertNull(new PerpetualInstrument("HYPE", 2, BigDecimal.ZERO).referencePrice());
+    assertNull(new PerpetualInstrument("HYPE", 2, new BigDecimal("-1")).referencePrice());
   }
 
   /** Rejects a depth price that needs one unit more than a signed integer can hold. */

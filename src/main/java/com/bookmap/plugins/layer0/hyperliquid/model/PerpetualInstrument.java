@@ -17,9 +17,19 @@ public final class PerpetualInstrument {
   private final int priceDecimals;
   private final double pips;
   private final double sizeMultiplier;
+  private final BigDecimal referencePrice;
 
-  /** Creates metadata for a perpetual instrument with a valid Hyperliquid size scale. */
+  /** Creates metadata without a reference price; tick candidates then fall back to the grid. */
   public PerpetualInstrument(String symbol, int sizeDecimals) {
+    this(symbol, sizeDecimals, null);
+  }
+
+  /**
+   * Creates metadata for a perpetual instrument with a valid Hyperliquid size scale.
+   *
+   * @param referencePrice mark price observed at login, or null; non-positive values are dropped
+   */
+  public PerpetualInstrument(String symbol, int sizeDecimals, BigDecimal referencePrice) {
     if (sizeDecimals < 0 || sizeDecimals > 6) {
       throw new IllegalArgumentException("sizeDecimals must be between zero and six");
     }
@@ -28,6 +38,8 @@ public final class PerpetualInstrument {
     this.priceDecimals = 6 - sizeDecimals;
     this.pips = Math.pow(10d, -priceDecimals);
     this.sizeMultiplier = Math.pow(10d, sizeDecimals);
+    this.referencePrice =
+        referencePrice != null && referencePrice.signum() > 0 ? referencePrice : null;
   }
 
   /** Returns the Hyperliquid symbol. */
@@ -45,9 +57,17 @@ public final class PerpetualInstrument {
     return priceDecimals;
   }
 
-  /** Returns the display price quantum. */
+  /**
+   * Returns the native price grid (lossless display quantum), not the Bookmap tick chosen at
+   * subscribe time.
+   */
   public double pips() {
     return pips;
+  }
+
+  /** Returns the mark price observed at login, or null when unknown. */
+  public BigDecimal referencePrice() {
+    return referencePrice;
   }
 
   /** Returns the quantity multiplier used by Bookmap. */
