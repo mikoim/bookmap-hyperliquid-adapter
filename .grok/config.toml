@@ -1,0 +1,10 @@
+[mcp_servers.hyperliquid-docs]
+url = "https://hyperliquid.gitbook.io/hyperliquid-docs/~gitbook/mcp"
+enabled = true
+startup_timeout_sec = 30
+tool_timeout_sec = 120
+
+[permission]
+allow = [
+  "MCPTool(hyperliquid-docs__*)",
+]

@@ -455,10 +455,12 @@ public final class HyperliquidSession
     }
     PerpetualInstrument instrument = SymbolLookup.resolve(instruments, symbol);
     if (instrument == null) {
+      sink.onDiagnostic("no unique instrument matches " + symbol);
       sink.onInstrumentNotFound(symbol, exchange, type);
       return;
     }
-    if (records.containsKey(instrument.symbol())) {
+    final String coin = instrument.symbol();
+    if (records.containsKey(coin)) {
       sink.onInstrumentAlreadySubscribed(symbol, exchange, type);
       return;
     }
@@ -494,7 +496,7 @@ public final class HyperliquidSession
             profile.feedMode(),
             parameters,
             new PriceBucketer(instrument, resolvedTick));
-    records.put(instrument.symbol(), record);
+    records.put(coin, record);
     record.setActivationTask(
         scheduler.schedule(
             new Runnable() {
@@ -504,12 +506,10 @@ public final class HyperliquidSession
                     new Runnable() {
                       @Override
                       public void run() {
-                        if (records.get(record.instrument().symbol()) == record
+                        if (records.get(coin) == record
                             && record.state() == SubscriptionRecord.State.PENDING_BOOK) {
                           removeRecord(
-                              record.instrument().symbol(),
-                              RemovalCause.TIMEOUT,
-                              "subscription activation timed out");
+                              coin, RemovalCause.TIMEOUT, "subscription activation timed out");
                         }
                       }
                     });

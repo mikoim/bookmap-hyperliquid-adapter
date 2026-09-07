@@ -631,6 +631,7 @@ public class ProviderEndToEndTest {
     fixture.ack("xyz:CL", "l2Book");
     fixture.ack("xyz:CL", "trades");
     fixture.book("xyz:CL", 1L, "92.282", "1.5", "92.283", "2.5");
+    fixture.trade("xyz:CL", "B", "92.283", "1.0", 2L, 9L);
     fixture.drain();
 
     assertTrue(
@@ -643,7 +644,15 @@ public class ProviderEndToEndTest {
             .contains("\"coin\":\"xyz:CL\""));
     assertEquals(Collections.singletonList("XYZ:CL"), fixture.instruments.added);
     assertEquals(0.001d, fixture.instruments.lastInfo.pips, 1e-12d);
-    assertFalse(fixture.data.depths.toString(), fixture.data.depths.isEmpty());
+    assertTrue(
+        fixture.data.depths.toString(), fixture.data.depths.get(0).startsWith("depth:XYZ:CL:"));
+    assertTrue(
+        fixture.data.trades.toString(), fixture.data.trades.get(0).startsWith("trade:XYZ:CL:"));
+
+    fixture.provider.unsubscribe("XYZ:CL");
+    fixture.drain();
+    fixture.completeSends();
+    assertEquals(Collections.singletonList("XYZ:CL"), fixture.instruments.removed);
     fixture.closeTwice();
     fixture.assertClosed();
   }

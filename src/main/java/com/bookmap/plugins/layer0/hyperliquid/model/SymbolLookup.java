@@ -30,7 +30,7 @@ public final class SymbolLookup {
     }
     PerpetualInstrument match = null;
     for (Map.Entry<String, PerpetualInstrument> entry : bySymbol.entrySet()) {
-      if (entry.getKey().equalsIgnoreCase(requested)) {
+      if (matches(entry.getKey(), requested)) {
         if (match != null) {
           return null;
         }
@@ -38,5 +38,14 @@ public final class SymbolLookup {
       }
     }
     return match;
+  }
+
+  /**
+   * Bookmap upper-cases with the default locale, which {@code equalsIgnoreCase} cannot reproduce:
+   * under a Turkish locale {@code knetiq} becomes {@code KNETİQ}. Both comparisons are tried so a
+   * name stays resolvable whichever locale the platform runs under.
+   */
+  private static boolean matches(String known, String requested) {
+    return known.equalsIgnoreCase(requested) || requested.equals(known.toUpperCase());
   }
 }

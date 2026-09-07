@@ -33,4 +33,13 @@
     <Class name="com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionKey"/>
     <Bug pattern="EI_EXPOSE_REP2"/>
   </Match>
+  <!--
+    SymbolLookup must reproduce the default-locale String.toUpperCase() that Bookmap's Subscribe
+    dialog already applied in this same JVM. A locale-independent conversion would not match it.
+  -->
+  <Match>
+    <Class name="com.bookmap.plugins.layer0.hyperliquid.model.SymbolLookup"/>
+    <Method name="matches"/>
+    <Bug pattern="DM_CONVERT_CASE"/>
+  </Match>
 </FindBugsFilter>

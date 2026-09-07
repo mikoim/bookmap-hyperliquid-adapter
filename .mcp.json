@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "hyperliquid-docs": {
+      "type": "http",
+      "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/~gitbook/mcp"
+    }
+  }
+}
+

@@ -273,7 +273,11 @@ public class HyperliquidSessionSubscriptionTest {
     fixture.drain();
     assertEquals(2, fixture.budget.reservedSubscriptionSlots());
     assertEquals(
-        Arrays.asList("not-found:UNKNOWN", "not-found:BTC", "already-subscribed:BTC"),
+        Arrays.asList(
+            "diagnostic:no unique instrument matches UNKNOWN",
+            "not-found:UNKNOWN",
+            "not-found:BTC",
+            "already-subscribed:BTC"),
         fixture.sink.events());
   }
 
