@@ -344,7 +344,9 @@ public class HyperliquidConnectorTest {
 
     fixture.connector.subscribe(trades, 20_000L);
     assertEquals(3, fixture.transport.connectCalls().size());
-    assertFalse(budget.tryAcquireFrames(1_000L, 1).acquired());
+    FrameReservation available = budget.tryAcquireFrames(1_000L, 1).permit();
+    assertTrue(available != null);
+    available.close();
     fixture.transport.openSocket();
     fixture.transport.socket().succeedNextSend();
     fixture.transport.socket().succeedNextSend();
@@ -398,6 +400,84 @@ public class HyperliquidConnectorTest {
     fixture.scheduler.advanceBy(10L);
 
     assertEquals(1, fixture.transport.socket().pendingSendCount());
+    fixture.connector.close();
+  }
+
+  @Test
+  public void reconnectHeartbeatWaitsForAndConsumesFreshFrameCapacity() {
+    HyperliquidProcessBudget budget = newBudget(2, 10, 4, 2);
+    Fixture fixture = new Fixture(budget);
+    fixture.startAndOpen();
+    fixture.transport.socket().succeedNextSend();
+    fixture.connector.reconnect(null);
+    fixture.advanceAndOpen(1_000L);
+    fixture.transport.socket().succeedNextSend();
+    FrameReservation held = budget.tryAcquireFrames(1_000L, 2).permit();
+    assertTrue("reconnect must not hold unused heartbeat capacity", held != null);
+
+    fixture.clock.now = 31_000L;
+    fixture.scheduler.advanceBy(30_000L);
+    assertEquals(0, fixture.transport.socket().pendingSendCount());
+    assertTrue(fixture.transport.socket().isOpen());
+    // A deferred, unsent PING must not start a PONG timeout.
+    fixture.clock.now = 46_001L;
+    fixture.scheduler.advanceBy(15_001L);
+    assertEquals(0, fixture.transport.socket().pendingSendCount());
+    assertTrue(fixture.transport.socket().isOpen());
+    held.close();
+    fixture.clock.now = 46_011L;
+    fixture.scheduler.advanceBy(10L);
+    assertEquals(1, fixture.transport.socket().pendingSendCount());
+    fixture.transport.socket().succeedNextSend();
+    fixture.connector.acceptPong(fixture.listener.lastGeneration);
+    assertEquals("{\"method\":\"ping\"}", fixture.transport.socket().successfulSendBodies().get(2));
+    FrameReservation remaining = budget.tryAcquireFrames(46_011L, 1).permit();
+    assertTrue(remaining != null);
+    assertFalse(budget.tryAcquireFrames(46_011L, 1).acquired());
+    remaining.close();
+    fixture.connector.close();
+  }
+
+  @Test
+  public void closeCancelsDeferredReconnectHeartbeat() {
+    HyperliquidProcessBudget budget = newBudget(2, 10, 4, 2);
+    Fixture fixture = new Fixture(budget);
+    fixture.startAndOpen();
+    fixture.transport.socket().succeedNextSend();
+    fixture.connector.reconnect(null);
+    fixture.advanceAndOpen(1_000L);
+    fixture.transport.socket().succeedNextSend();
+    FrameReservation held = budget.tryAcquireFrames(1_000L, 2).permit();
+    assertTrue(held != null);
+    fixture.clock.now = 31_000L;
+    fixture.scheduler.advanceBy(30_000L);
+    assertEquals(0, fixture.transport.socket().pendingSendCount());
+    assertTrue(fixture.transport.socket().isOpen());
+
+    fixture.connector.close();
+    held.close();
+    fixture.clock.now = 91_000L;
+    fixture.scheduler.advanceBy(60_000L);
+    assertEquals(0, fixture.transport.socket().pendingSendCount());
+    assertEquals(2, fixture.transport.socket().successfulSendBodies().size());
+    assertEquals(2, fixture.transport.connectCalls().size());
+    assertEquals(-1L, fixture.scheduler.nextDelayMillis());
+  }
+
+  @Test
+  public void relayReconnectWithoutSubscriptionsReservesNoFrames() {
+    HyperliquidProcessBudget budget = newBudget(2, 10, 1, 2);
+    Fixture fixture = new Fixture(budget);
+    fixture.connector.start(
+        SourceProfile.of(MarketDataSource.BORSA, HyperliquidEnvironment.MAINNET));
+    fixture.transport.completeMeta(200, validMeta("BTC"));
+    fixture.transport.openSocket();
+    fixture.connector.reconnect(null);
+    fixture.advanceAndOpen(1_000L);
+
+    FrameReservation available = budget.tryAcquireFrames(1_000L, 1).permit();
+    assertTrue("an empty relay reconnect has no opening frames to reserve", available != null);
+    available.close();
     fixture.connector.close();
   }
 

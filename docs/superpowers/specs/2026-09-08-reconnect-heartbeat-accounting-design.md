@@ -1,7 +1,7 @@
 # 再接続後の heartbeat フレーム会計
 
 日付: 2026-09-08
-状態: spec-review READY、人間の承認待ち
+状態: spec-review READY、人間の承認済み
 起点: ローカル main `cbbd8c1`（HIP-3 対応マージ済み）
 
 ## 目的と範囲
@@ -16,7 +16,8 @@ architectural として仕様承認・計画レビューを経て実装する。
 
 ## 原因の再確認
 
-現行コードで以下の経路を確認した。実行による再現は実装フェーズ冒頭の失敗テストで記録する。
+修正前コードで以下の経路を確認し、実装フェーズ冒頭の失敗テストでも再現した。
+実行結果と変異検証は対応する実装計画の Execution evidence に記録する。
 
 - `attemptConnection(false)` は `reservedFrameCount()` 枠を connection permit に確保する。
 - 現在の式は `desired.size() + (sendsAssetContextFeed() ? 2 : 1)`。

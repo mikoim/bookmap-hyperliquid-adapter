@@ -30,6 +30,48 @@ import org.junit.Test;
 public class HyperliquidSessionLifecycleTest {
 
   @Test
+  public void reconnectedSessionSurvivesRepeatedHeartbeats() {
+    Fixture fixture = fixtureWithActiveBtc();
+    fixture.beginRecovery();
+    fixture.completeSends(2);
+    fixture.book(2L);
+    fixture.ack(SubscriptionType.L2_BOOK);
+    fixture.ack(SubscriptionType.TRADES);
+    fixture.drain();
+    assertEquals(1, count(fixture.sink.events(), "connection-restored"));
+
+    for (int cycle = 0; cycle < 10; cycle++) {
+      fixture.scheduler.advanceBy(30_000L);
+      fixture.drain();
+      assertEquals(
+          "heartbeat " + (cycle + 1) + ": " + fixture.sink.events(),
+          0,
+          count(fixture.sink.events(), "connection-lost:FATAL"));
+      assertEquals(1, fixture.transport.socket().pendingSendCount());
+      fixture.completeSends(1);
+      assertEquals(
+          cycle + 1,
+          count(fixture.transport.socket().successfulSendBodies(), "{\"method\":\"ping\"}"));
+      fixture.transport.emitTextFromConnection(1, "{\"channel\":\"pong\"}");
+      fixture.drain();
+      assertEquals(2, fixture.transport.connectCalls().size());
+      assertEquals(2, fixture.budget.reservedSubscriptionSlots());
+    }
+
+    // Drain the PONG deadline before advancing its possible reconnect backoff.
+    fixture.scheduler.advanceBy(15_000L);
+    fixture.drain();
+    fixture.scheduler.advanceBy(1_000L);
+    fixture.drain();
+    fixture.trade(3L, 99L);
+    fixture.drain();
+    assertEquals(1, fixture.sink.trades().size());
+    assertEquals(2, fixture.transport.connectCalls().size());
+    fixture.session.close();
+    fixture.drain();
+  }
+
+  @Test
   public void invalidMetadataFailsFatallyWithoutOpeningWebSocket() {
     Fixture fixture = new Fixture();
     fixture.startLogin();

@@ -738,7 +738,7 @@ public final class HyperliquidConnector implements AutoCloseable {
                     new OutboundMessage(OutboundMessage.Kind.PING, null, "{\"method\":\"ping\"}"),
                     heartbeatGeneration,
                     Long.MAX_VALUE,
-                    initialConnection ? null : connectionPermit);
+                    null);
                 scheduleHeartbeat(heartbeatGeneration);
               }
             },
@@ -896,9 +896,9 @@ public final class HyperliquidConnector implements AutoCloseable {
     return profile != null && profile.source() == MarketDataSource.HYPERLIQUID;
   }
 
-  /** Each desired subscription, plus one ping's headroom, plus the feed frame where it is sent. */
+  /** Reserves only the subscription frames sent when a reconnected socket opens. */
   private int reservedFrameCount() {
-    return desired.size() + (sendsAssetContextFeed() ? 2 : 1);
+    return desired.size() + (sendsAssetContextFeed() ? 1 : 0);
   }
 
   private void removeExpiredSubscriptions(long nowMillis) {

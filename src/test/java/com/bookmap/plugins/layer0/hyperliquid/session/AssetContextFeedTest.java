@@ -206,12 +206,7 @@ public class AssetContextFeedTest {
         fixture.sink.events().toString(), hasEvent(fixture.sink.events(), "connection-lost"));
   }
 
-  /**
-   * A retried feed connection keeps its heartbeat indefinitely. The retry stays an <em>initial</em>
-   * attempt, so every send acquires its own frame; a reconnect attempt would instead draw on the
-   * connection permit's fixed reservation, which one subscribe and one ping exhaust, and the second
-   * heartbeat would tear the connection down and start it churning.
-   */
+  /** A connection that failed before opening still starts and sustains its heartbeat on retry. */
   @Test
   public void retriedFeedConnectionSurvivesRepeatedHeartbeats() {
     Fixture fixture = new Fixture(MarketDataSource.BORSA, false);
@@ -236,6 +231,49 @@ public class AssetContextFeedTest {
     }
 
     assertEquals(connectionsAfterRetry, fixture.transport.connectCalls().size());
+  }
+
+  /** A feed that previously opened must also survive beyond its second reconnect heartbeat. */
+  @Test
+  public void reconnectedFeedSurvivesRepeatedHeartbeats() {
+    Fixture fixture = new Fixture(MarketDataSource.BORSA);
+    fixture.transport.remoteCloseConnection(1, 1006, "lost");
+    fixture.drain();
+    fixture.advance(1_000L);
+    assertEquals(3, fixture.transport.connectCalls().size());
+    fixture.open(2);
+
+    for (int cycle = 0; cycle < 10; cycle++) {
+      fixture.advance(30_000L);
+      assertEquals(
+          "heartbeat " + (cycle + 1) + ": " + fixture.sink.events(),
+          1,
+          countEvents(fixture.sink.events(), "diagnostic:asset-context feed disconnected"));
+      assertEquals(2, fixture.transport.socket().pendingSendCount());
+      for (int ping = 0; ping < 2; ping++) {
+        fixture.transport.socket().succeedNextSend();
+        fixture.drain();
+      }
+      assertEquals(
+          2 * (cycle + 1),
+          countEvents(fixture.transport.socket().successfulSendBodies(), "{\"method\":\"ping\"}"));
+      fixture.transport.emitTextFromConnection(0, "{\"channel\":\"pong\"}");
+      fixture.transport.emitTextFromConnection(2, "{\"channel\":\"pong\"}");
+      fixture.drain();
+      assertEquals(3, fixture.transport.connectCalls().size());
+    }
+
+    fixture.advance(15_000L);
+    fixture.advance(1_000L);
+    assertEquals(3, fixture.transport.connectCalls().size());
+    assertEquals(
+        1, countEvents(fixture.sink.events(), "diagnostic:asset-context feed disconnected"));
+    fixture.transport.emitTextFromConnection(
+        2, TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"88.125\"}}"));
+    fixture.drain();
+    assertEquals("88.125", fixture.sink.lastReferencePrice("HYPE"));
+    fixture.session.close();
+    fixture.drain();
   }
 
   /**
