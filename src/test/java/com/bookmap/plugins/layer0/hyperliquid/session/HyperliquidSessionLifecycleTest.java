@@ -695,6 +695,12 @@ public class HyperliquidSessionLifecycleTest {
             clock,
             dispatcher,
             sink,
+            new AssetContextConnectorFactory() {
+              @Override
+              public HyperliquidConnector create() {
+                throw new AssertionError("this fixture uses the Hyperliquid source only");
+              }
+            },
             new Runnable() {
               @Override
               public void run() {

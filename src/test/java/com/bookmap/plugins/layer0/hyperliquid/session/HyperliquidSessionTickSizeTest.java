@@ -217,6 +217,19 @@ public class HyperliquidSessionTickSizeTest {
             clock,
             dispatcher,
             sink,
+            new AssetContextConnectorFactory() {
+              @Override
+              public HyperliquidConnector create() {
+                return new HyperliquidConnector(
+                    transport,
+                    new HyperliquidMetaParser(),
+                    budget,
+                    scheduler,
+                    clock,
+                    dispatcher::submitControl,
+                    false);
+              }
+            },
             HyperliquidSessionTickSizeTest::noop);
 
     /**
@@ -229,7 +242,7 @@ public class HyperliquidSessionTickSizeTest {
       transport.completeMeta(
           200, TestMetadata.wrap(TestMetadata.universe("HYPE"), new String[] {markPx}));
       drain();
-      transport.openSocket();
+      transport.openConnection(0);
       drain();
       if (source == MarketDataSource.HYPERLIQUID) {
         transport.socket().succeedNextSend();

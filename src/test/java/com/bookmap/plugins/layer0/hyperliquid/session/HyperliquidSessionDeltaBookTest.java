@@ -273,6 +273,19 @@ public class HyperliquidSessionDeltaBookTest {
             clock,
             dispatcher,
             sink,
+            new AssetContextConnectorFactory() {
+              @Override
+              public HyperliquidConnector create() {
+                return new HyperliquidConnector(
+                    transport,
+                    new HyperliquidMetaParser(),
+                    budget,
+                    scheduler,
+                    clock,
+                    dispatcher::submitControl,
+                    false);
+              }
+            },
             HyperliquidSessionDeltaBookTest::noop);
     private long generation = 1L;
 
@@ -281,7 +294,7 @@ public class HyperliquidSessionDeltaBookTest {
       drain();
       transport.completeMeta(200, TestMetadata.wrap(TestMetadata.universe("BTC")));
       drain();
-      transport.openSocket();
+      transport.openConnection(0);
       drain();
     }
 
@@ -301,7 +314,7 @@ public class HyperliquidSessionDeltaBookTest {
     }
 
     void beginRecovery() {
-      transport.remoteClose(1006, "lost");
+      transport.remoteCloseConnection(0, 1006, "lost");
       drain();
       clock.now += 1_000L;
       scheduler.advanceBy(1_000L);

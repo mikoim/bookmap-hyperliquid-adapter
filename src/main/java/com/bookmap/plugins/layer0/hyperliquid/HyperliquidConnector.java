@@ -40,7 +40,8 @@ public final class HyperliquidConnector implements AutoCloseable {
     1_000L, 2_000L, 4_000L, 8_000L, 16_000L, 32_000L, 60_000L
   };
 
-  static final String ASSET_CONTEXTS_SUBSCRIBE_JSON =
+  /** The single subscription frame that opens Hyperliquid's mark-price feed. */
+  public static final String ASSET_CONTEXTS_SUBSCRIBE_JSON =
       "{\"method\":\"subscribe\",\"subscription\":{\"type\":\"fastAssetCtxs\"}}";
 
   /** Receives lifecycle events emitted by the connector. */
@@ -71,6 +72,7 @@ public final class HyperliquidConnector implements AutoCloseable {
   private final CancellableScheduler scheduler;
   private final LongSupplier clock;
   private final Consumer<Runnable> stateSubmitter;
+  private final boolean ownsTransport;
   private final TreeMap<SubscriptionKey, SubscriptionKey> desired =
       new TreeMap<SubscriptionKey, SubscriptionKey>();
   private final TreeMap<SubscriptionKey, Long> activationDeadlines =
@@ -100,7 +102,7 @@ public final class HyperliquidConnector implements AutoCloseable {
   private boolean socketOpened;
   private boolean initialFailureReported;
 
-  /** Creates a connector with explicitly injected asynchronous boundaries. */
+  /** Creates a connector that owns and closes the supplied transport. */
   public HyperliquidConnector(
       HyperliquidTransport transport,
       HyperliquidMetaParser metaParser,
@@ -108,6 +110,23 @@ public final class HyperliquidConnector implements AutoCloseable {
       CancellableScheduler scheduler,
       LongSupplier clock,
       Consumer<Runnable> stateSubmitter) {
+    this(transport, metaParser, budget, scheduler, clock, stateSubmitter, true);
+  }
+
+  /**
+   * Creates a connector with explicitly injected asynchronous boundaries.
+   *
+   * @param ownsTransport whether {@link #close()} also closes the transport; pass false when the
+   *     transport is shared with another connector
+   */
+  public HyperliquidConnector(
+      HyperliquidTransport transport,
+      HyperliquidMetaParser metaParser,
+      HyperliquidProcessBudget budget,
+      CancellableScheduler scheduler,
+      LongSupplier clock,
+      Consumer<Runnable> stateSubmitter,
+      boolean ownsTransport) {
     if (transport == null
         || metaParser == null
         || budget == null
@@ -122,6 +141,7 @@ public final class HyperliquidConnector implements AutoCloseable {
     this.scheduler = scheduler;
     this.clock = clock;
     this.stateSubmitter = stateSubmitter;
+    this.ownsTransport = ownsTransport;
   }
 
   /** Sets the listener once, before the connector is started. */
@@ -145,6 +165,20 @@ public final class HyperliquidConnector implements AutoCloseable {
           @Override
           public void run() {
             startOnStateLane(newProfile);
+          }
+        });
+  }
+
+  /**
+   * Starts the WebSocket lifecycle without requesting metadata. {@link Listener#onMetadata} is
+   * never reported; the asset-context feed uses this because the session already has the universe.
+   */
+  public void startWithoutMetadata(final SourceProfile newProfile) {
+    stateSubmitter.accept(
+        new Runnable() {
+          @Override
+          public void run() {
+            startFeedOnlyOnStateLane(newProfile);
           }
         });
   }
@@ -303,6 +337,24 @@ public final class HyperliquidConnector implements AutoCloseable {
     } catch (Exception failure) {
       reportInitialFailure(classify(failure, TransportFailure.Kind.NETWORK));
     }
+  }
+
+  private void startFeedOnlyOnStateLane(SourceProfile newProfile) {
+    if (closed || started) {
+      return;
+    }
+    if (listener == null || newProfile == null) {
+      throw new IllegalStateException("listener and profile must be set before start");
+    }
+    started = true;
+    profile = newProfile;
+    try {
+      transport.start();
+    } catch (Exception failure) {
+      reportInitialFailure(classify(failure, TransportFailure.Kind.NETWORK));
+      return;
+    }
+    attemptConnection(true);
   }
 
   private void completeMetadata(int statusCode, String body, Throwable failure) {
@@ -866,7 +918,9 @@ public final class HyperliquidConnector implements AutoCloseable {
     cancel(connectionRetry);
     connectionRetry = null;
     disconnectCurrent(protocolFailure("connector closed", null), false);
-    transport.close();
+    if (ownsTransport) {
+      transport.close();
+    }
   }
 
   private void cancel(HyperliquidTransport.Cancellable cancellable) {

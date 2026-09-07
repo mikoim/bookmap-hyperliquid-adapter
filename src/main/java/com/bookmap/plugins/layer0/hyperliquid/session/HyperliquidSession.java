@@ -1,6 +1,7 @@
 package com.bookmap.plugins.layer0.hyperliquid.session;
 
 import com.bookmap.plugins.layer0.hyperliquid.HyperliquidConnector;
+import com.bookmap.plugins.layer0.hyperliquid.MarketDataSource;
 import com.bookmap.plugins.layer0.hyperliquid.OutboundMessage;
 import com.bookmap.plugins.layer0.hyperliquid.SourceProfile;
 import com.bookmap.plugins.layer0.hyperliquid.book.DeltaOrderBook;
@@ -62,6 +63,7 @@ public final class HyperliquidSession
   private final BoundedTradeDeduplicator tradeDeduplicator =
       new BoundedTradeDeduplicator(TRADE_DEDUPLICATION_CAPACITY, TRADE_DEDUPLICATION_TTL_MILLIS);
   private final AssetContextStore assetContexts = new AssetContextStore();
+  private final AssetContextConnectorFactory assetContextConnectorFactory;
   private final Map<String, PerpetualInstrument> instruments =
       new TreeMap<String, PerpetualInstrument>();
   private final Map<String, SubscriptionRecord> records = new TreeMap<String, SubscriptionRecord>();
@@ -86,6 +88,7 @@ public final class HyperliquidSession
   private ConnectionState connectionState = ConnectionState.STARTING;
   private long currentGeneration = -1L;
   private SourceProfile profile;
+  private AssetContextFeed assetContextFeed;
 
   /**
    * Creates a session using explicitly supplied connector, scheduling, and state-lane boundaries.
@@ -98,6 +101,7 @@ public final class HyperliquidSession
       LongSupplier clock,
       StateEventDispatcher dispatcher,
       SessionSink sink,
+      AssetContextConnectorFactory assetContextConnectorFactory,
       Runnable afterClose) {
     if (connector == null
         || parser == null
@@ -106,6 +110,7 @@ public final class HyperliquidSession
         || clock == null
         || dispatcher == null
         || sink == null
+        || assetContextConnectorFactory == null
         || afterClose == null) {
       throw new IllegalArgumentException("session dependencies must not be null");
     }
@@ -116,6 +121,7 @@ public final class HyperliquidSession
     this.clock = clock;
     this.dispatcher = dispatcher;
     this.sink = sink;
+    this.assetContextConnectorFactory = assetContextConnectorFactory;
     this.afterClose = afterClose;
     connector.setListener(this);
   }
@@ -222,6 +228,29 @@ public final class HyperliquidSession
     }
     metadataReceived = true;
     sink.onKnownInstruments(new ArrayList<PerpetualInstrument>(instruments.values()));
+    startAssetContextFeedIfNeeded();
+  }
+
+  /**
+   * Borsa and Hyperdash reject fastAssetCtxs, so a relay takes mark prices from a second connection
+   * straight to Hyperliquid Mainnet. It starts here rather than at login so that the universe is
+   * already known when its first snapshot arrives.
+   */
+  private void startAssetContextFeedIfNeeded() {
+    if (profile == null
+        || profile.source() == MarketDataSource.HYPERLIQUID
+        || assetContextFeed != null) {
+      return;
+    }
+    HyperliquidConnector feedConnector = assetContextConnectorFactory.create();
+    if (feedConnector == null) {
+      sink.onDiagnostic("asset-context feed unavailable; tick candidates stay on the grid");
+      return;
+    }
+    assetContextFeed =
+        new AssetContextFeed(
+            feedConnector, parser, this, dispatcher::submitControl, sink::onDiagnostic);
+    assetContextFeed.start();
   }
 
   /** Receives initial connector failure on the serialized state lane. */
@@ -459,9 +488,9 @@ public final class HyperliquidSession
       } else if (event.kind() == ControlEvent.Kind.SUBSCRIPTION_ERROR) {
         handleSubscriptionError(event.target());
       } else if (event.kind() == ControlEvent.Kind.ASSET_CONTEXTS) {
-        boolean snapshot = assetContextSnapshotPending;
-        assetContextSnapshotPending = false;
-        onAssetContexts(event.markPrices(), snapshot);
+        if (onAssetContexts(event.markPrices(), assetContextSnapshotPending)) {
+          assetContextSnapshotPending = false;
+        }
       }
     }
   }
@@ -470,15 +499,18 @@ public final class HyperliquidSession
    * Applies decoded mark prices and refreshes the known-instrument list. Callers must already run
    * on the state lane; the Hyperliquid source enters through {@link #handleControls} and a relay
    * enters through its dedicated asset-context feed.
+   *
+   * @return whether the store consumed the frame, so a caller only clears its pending-snapshot flag
+   *     once the snapshot has really been applied
    */
-  void onAssetContexts(Map<String, BigDecimal> markPrices, boolean snapshot) {
+  boolean onAssetContexts(Map<String, BigDecimal> markPrices, boolean snapshot) {
     if (closed || !metadataReceived) {
-      return;
+      return false;
     }
     if (snapshot) {
       assetContexts.applySnapshot(markPrices);
     } else if (!shouldRepublish(assetContexts.applyDelta(markPrices))) {
-      return;
+      return true;
     }
     assetContextPublished = true;
     lastAssetContextPublishMillis = clock.getAsLong();
@@ -489,6 +521,7 @@ public final class HyperliquidSession
               current.symbol(), current.sizeDecimals(), assetContexts.markPrice(current.symbol())));
     }
     sink.onKnownInstruments(new ArrayList<PerpetualInstrument>(instruments.values()));
+    return true;
   }
 
   /** Rebuilds only when a listed instrument moved and the throttle window has elapsed. */
@@ -928,6 +961,10 @@ public final class HyperliquidSession
     if (cause == StopCause.FATAL && loginNotified && !lossNotifiedForIncident) {
       lossNotifiedForIncident = true;
       sink.onConnectionLost(ConnectionFailure.FATAL, "Hyperliquid session stopped fatally");
+    }
+    if (assetContextFeed != null) {
+      assetContextFeed.close();
+      assetContextFeed = null;
     }
     connector.close();
     for (String alias : new ArrayList<String>(records.keySet())) {

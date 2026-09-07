@@ -144,6 +144,12 @@ public class HyperliquidSessionAssetContextTest {
             clock,
             dispatcher,
             sink,
+            new AssetContextConnectorFactory() {
+              @Override
+              public HyperliquidConnector create() {
+                throw new AssertionError("this fixture uses the Hyperliquid source only");
+              }
+            },
             HyperliquidSessionAssetContextTest::noop);
 
     Fixture() {

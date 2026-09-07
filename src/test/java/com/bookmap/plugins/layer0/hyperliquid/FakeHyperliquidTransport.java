@@ -28,6 +28,7 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
   private boolean httpCancelled;
   private boolean connectCancelled;
   private boolean closed;
+  private int closeCount;
 
   @Override
   public void start() {
@@ -71,8 +72,13 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
 
   @Override
   public void close() {
+    closeCount++;
     closed = true;
     socket.close(1000, "transport closed");
+  }
+
+  public int closeCount() {
+    return closeCount;
   }
 
   public URI httpUri() {
@@ -185,6 +191,26 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
     connectHandles.get(connectHandles.size() - 1).completed = true;
     socket.open = true;
     socketCallback.onOpen(socket);
+  }
+
+  /** Opens one specific connection so tests can drive two connectors on one transport. */
+  public void openConnection(int connectionIndex) {
+    connectHandles.get(connectionIndex).completed = true;
+    socket.open = true;
+    socketCallbacks.get(connectionIndex).onOpen(socket);
+  }
+
+  /** Fails one specific connection without disturbing the others. */
+  public void failConnection(int connectionIndex, Throwable failure) {
+    connectHandles.get(connectionIndex).completed = true;
+    socketCallbacks.get(connectionIndex).onFailure(failure);
+  }
+
+  /** Closes one specific connection without disturbing the others. */
+  public void remoteCloseConnection(int connectionIndex, int code, String reason) {
+    connectHandles.get(connectionIndex).completed = true;
+    socket.open = false;
+    socketCallbacks.get(connectionIndex).onClose(code, reason);
   }
 
   public void remoteClose(int code, String reason) {

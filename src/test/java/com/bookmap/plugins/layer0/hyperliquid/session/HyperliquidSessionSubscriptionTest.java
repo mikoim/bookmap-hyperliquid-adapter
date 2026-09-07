@@ -788,6 +788,12 @@ public class HyperliquidSessionSubscriptionTest {
             clock,
             dispatcher,
             sink,
+            new AssetContextConnectorFactory() {
+              @Override
+              public HyperliquidConnector create() {
+                throw new AssertionError("this fixture uses the Hyperliquid source only");
+              }
+            },
             HyperliquidSessionSubscriptionTest::noop);
     private long generation = 1L;
 

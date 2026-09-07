@@ -8,6 +8,7 @@ import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.TickSizePlan;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMessageParser;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMetaParser;
+import com.bookmap.plugins.layer0.hyperliquid.session.AssetContextConnectorFactory;
 import com.bookmap.plugins.layer0.hyperliquid.session.ConnectionFailure;
 import com.bookmap.plugins.layer0.hyperliquid.session.HyperliquidSession;
 import com.bookmap.plugins.layer0.hyperliquid.session.HyperliquidSessionApi;
@@ -399,6 +400,16 @@ public final class Provider extends ExternalLiveBaseProvider {
               scheduler,
               clock,
               dispatcher::submitControl);
+      AssetContextConnectorFactory assetContextConnectorFactory =
+          () ->
+              new HyperliquidConnector(
+                  transport,
+                  new HyperliquidMetaParser(),
+                  budget,
+                  scheduler,
+                  clock,
+                  dispatcher::submitControl,
+                  false);
       HyperliquidSession session =
           new HyperliquidSession(
               connector,
@@ -408,6 +419,7 @@ public final class Provider extends ExternalLiveBaseProvider {
               clock,
               dispatcher,
               sink,
+              assetContextConnectorFactory,
               () -> {
                 scheduler.close();
                 stateExecutor.shutdown();

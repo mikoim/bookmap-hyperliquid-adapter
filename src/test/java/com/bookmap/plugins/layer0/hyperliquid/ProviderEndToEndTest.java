@@ -10,6 +10,7 @@ import com.bookmap.plugins.layer0.hyperliquid.concurrent.ManualScheduler;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.StateEventDispatcher;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMessageParser;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMetaParser;
+import com.bookmap.plugins.layer0.hyperliquid.session.AssetContextConnectorFactory;
 import com.bookmap.plugins.layer0.hyperliquid.session.HyperliquidSession;
 import com.bookmap.plugins.layer0.hyperliquid.session.HyperliquidSessionApi;
 import com.bookmap.plugins.layer0.hyperliquid.session.SessionSink;
@@ -610,6 +611,9 @@ public class ProviderEndToEndTest {
   }
 
   private static final class Fixture {
+    private static final int MARKET_DATA_CONNECTION = 0;
+    private static final int FEED_CONNECTION = 1;
+
     private final FakeHyperliquidTransport transport = new FakeHyperliquidTransport();
     private final ManualScheduler scheduler = new ManualScheduler();
     private final Clock clock = new Clock();
@@ -623,6 +627,7 @@ public class ProviderEndToEndTest {
     private final RecordingAdmin admin = new RecordingAdmin(trace);
     private final RecordingInstrument instruments = new RecordingInstrument(trace);
     private final RecordingData data = new RecordingData(trace);
+    private boolean feedConnectorCreated;
 
     private Fixture(HyperliquidProcessBudget budget) {
       this.budget = budget;
@@ -661,6 +666,20 @@ public class ProviderEndToEndTest {
                           clock,
                           dispatcher,
                           sink,
+                          new AssetContextConnectorFactory() {
+                            @Override
+                            public HyperliquidConnector create() {
+                              feedConnectorCreated = true;
+                              return new HyperliquidConnector(
+                                  transport,
+                                  new HyperliquidMetaParser(),
+                                  budget,
+                                  scheduler,
+                                  clock,
+                                  dispatcher::submitControl,
+                                  false);
+                            }
+                          },
                           new Runnable() {
                             @Override
                             public void run() {
@@ -727,15 +746,14 @@ public class ProviderEndToEndTest {
               + "\",\"coin\":\""
               + coin
               + "\"}}}";
-      transport.emitTextFromConnection(transport.connectCalls().size() - 1, response);
+      transport.emitTextFromConnection(marketDataConnection(), response);
       drain();
     }
 
     private void book(
         String coin, long time, String bidPrice, String bidSize, String askPrice, String askSize) {
       transport.emitTextFromConnection(
-          transport.connectCalls().size() - 1,
-          bookJson(coin, time, bidPrice, bidSize, askPrice, askSize));
+          marketDataConnection(), bookJson(coin, time, bidPrice, bidSize, askPrice, askSize));
     }
 
     private String bookJson(
@@ -757,7 +775,7 @@ public class ProviderEndToEndTest {
 
     private void trade(String coin, String side, String price, String size, long time, long tid) {
       transport.emitTextFromConnection(
-          transport.connectCalls().size() - 1,
+          marketDataConnection(),
           "{\"channel\":\"trades\",\"data\":[{\"coin\":\""
               + coin
               + "\",\"side\":\""
@@ -803,7 +821,7 @@ public class ProviderEndToEndTest {
       String target =
           coin == null ? "" : ",\"subscription\":{\"type\":\"l2Book\",\"coin\":\"" + coin + "\"}";
       transport.emitTextFromConnection(
-          transport.connectCalls().size() - 1,
+          marketDataConnection(),
           "{\"channel\":\"error\",\"data\":{\"message\":\"bad\"" + target + "}}");
     }
 
@@ -892,12 +910,21 @@ public class ProviderEndToEndTest {
       drain();
       transport.completeMeta(200, metadata("BTC"));
       drain();
-      transport.openSocket();
+      transport.openConnection(MARKET_DATA_CONNECTION);
       drain();
     }
 
     private void frame(String json) {
-      transport.emitTextFromConnection(transport.connectCalls().size() - 1, json);
+      transport.emitTextFromConnection(marketDataConnection(), json);
+    }
+
+    /**
+     * A relay's asset-context feed owns connect handle {@link #FEED_CONNECTION}; every other handle
+     * belongs to the market-data connection, whose newest generation is the last handle.
+     */
+    private int marketDataConnection() {
+      int last = transport.connectCalls().size() - 1;
+      return feedConnectorCreated && last == FEED_CONNECTION ? MARKET_DATA_CONNECTION : last;
     }
   }
 
