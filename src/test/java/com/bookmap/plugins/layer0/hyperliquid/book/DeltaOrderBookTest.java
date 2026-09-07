@@ -137,4 +137,74 @@ public class DeltaOrderBookTest {
   private static DepthUpdate depth(boolean bid, int price, int size) {
     return new DepthUpdate(bid, price, size);
   }
+
+  @Test
+  public void coarseTickPublishesBucketTotalsAndFoldsDeltasIntoThem() {
+    PerpetualInstrument hype = new PerpetualInstrument("HYPE", 2);
+    DeltaOrderBook coarse =
+        new DeltaOrderBook(hype, new PriceBucketer(hype, new BigDecimal("0.01")));
+    coarse.applySeed(
+        snapshot(
+            1L,
+            levels(level("87.784", "2.36"), level("87.783", "1.32")),
+            levels(level("87.785", "161.16"))));
+
+    assertEquals(
+        Arrays.asList(depth(true, 8778, 368), depth(false, 8779, 16116)), coarse.publishStaged());
+
+    DeltaOrderBook.Result shrink =
+        coarse.applyDelta(snapshot(2L, levels(level("87.783", "0")), levels()), true);
+    assertEquals(Arrays.asList(depth(true, 8778, 236)), shrink.updates());
+
+    DeltaOrderBook.Result grow =
+        coarse.applyDelta(
+            snapshot(3L, levels(), levels(level("87.786", "1"), level("87.789", "2"))), true);
+    assertEquals(Arrays.asList(depth(false, 8779, 16416)), grow.updates());
+
+    DeltaOrderBook.Result vanish =
+        coarse.applyDelta(snapshot(4L, levels(level("87.784", "0")), levels()), true);
+    assertEquals(Arrays.asList(depth(true, 8778, 0)), vanish.updates());
+
+    DeltaOrderBook.Result unchanged =
+        coarse.applyDelta(snapshot(5L, levels(), levels(level("87.786", "1"))), true);
+    assertTrue(unchanged.updates().isEmpty());
+
+    DeltaOrderBook.Result newBucket =
+        coarse.applyDelta(snapshot(6L, levels(), levels(level("87.795", "1"))), true);
+    assertEquals(Arrays.asList(depth(false, 8780, 100)), newBucket.updates());
+    assertEquals(
+        Arrays.asList(depth(false, 8779, 0), depth(false, 8780, 0)), coarse.clearPublished());
+  }
+
+  @Test
+  public void coarseTickReplacePublishedDeletesVanishedBucketsAndReemitsStagedOnes() {
+    PerpetualInstrument hype = new PerpetualInstrument("HYPE", 2);
+    DeltaOrderBook coarse =
+        new DeltaOrderBook(hype, new PriceBucketer(hype, new BigDecimal("0.01")));
+    coarse.applySeed(snapshot(1L, levels(level("87.784", "1")), levels(level("87.795", "1"))));
+    coarse.publishStaged();
+    coarse.beginGeneration();
+    coarse.applySeed(snapshot(2L, levels(level("87.774", "2")), levels(level("87.795", "3"))));
+    assertTrue(
+        coarse
+            .applyDelta(snapshot(2L, levels(level("87.771", "1")), levels()), false)
+            .updates()
+            .isEmpty());
+
+    assertEquals(
+        Arrays.asList(depth(true, 8778, 0), depth(true, 8777, 300), depth(false, 8780, 300)),
+        coarse.replacePublished());
+  }
+
+  @Test
+  public void coarseTickBucketTotalsSaturate() {
+    PerpetualInstrument hype = new PerpetualInstrument("HYPE", 2);
+    DeltaOrderBook coarse =
+        new DeltaOrderBook(hype, new PriceBucketer(hype, new BigDecimal("0.01")));
+    coarse.applySeed(
+        snapshot(
+            1L, levels(level("87.784", "21474836.47"), level("87.783", "21474836.47")), levels()));
+
+    assertEquals(Arrays.asList(depth(true, 8778, Integer.MAX_VALUE)), coarse.publishStaged());
+  }
 }
