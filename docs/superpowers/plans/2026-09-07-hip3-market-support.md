@@ -301,7 +301,7 @@ public class AssetContextCodecTest {
   @Test
   public void rejectsPayloadsBeyondTheDecompressionLimit() throws Exception {
     StringBuilder json = new StringBuilder("{");
-    for (int index = 0; index * 40 < AssetContextCodec.MAX_DECOMPRESSED_BYTES + 40; index++) {
+    for (int index = 0; json.length() <= AssetContextCodec.MAX_DECOMPRESSED_BYTES; index++) {
       if (index != 0) {
         json.append(',');
       }
@@ -863,28 +863,51 @@ In `HyperliquidConnector`, add the constant next to `RECONNECT_DELAYS`:
       "{\"method\":\"subscribe\",\"subscription\":{\"type\":\"fastAssetCtxs\"}}";
 ```
 
+Only a connection to Hyperliquid itself carries the feed. Borsa and Hyperdash reject the
+subscription, and their rejection text is not guaranteed to name `fastAssetCtxs`, so an unrecognised
+untargeted `error` frame would reach `HyperliquidSession.handleSubscriptionError(null)`, find no
+record, and `stop(StopCause.FATAL)` — killing the relay session on every generation. Send the frame
+only where the exchange accepts it. Add the predicate next to `activationDeadlineFor`:
+
+```java
+  /** Only Hyperliquid serves fastAssetCtxs; the relays reject the subscription outright. */
+  private boolean sendsAssetContextFeed() {
+    return profile != null && profile.source() == MarketDataSource.HYPERLIQUID;
+  }
+
+  private int reservedFrameCount() {
+    return desired.size() + (sendsAssetContextFeed() ? 2 : 1);
+  }
+```
+
 In `attemptConnection`, change the reservation to leave room for the feed frame:
 
 ```java
-    int reservedFrames = initial ? 0 : desired.size() + 2;
+    int reservedFrames = initial ? 0 : reservedFrameCount();
 ```
 
 In `socketOpened`, change the reservation cross-check to match:
 
 ```java
-    if (!openingInitial && connectionPermit.reservedFramesRemaining() > desired.size() + 2) {
+    if (!openingInitial && connectionPermit.reservedFramesRemaining() > reservedFrameCount()) {
 ```
 
 Still in `socketOpened`, send the feed frame immediately after `listener.onSocketOpened(openingGeneration);` and before the `if (!openingInitial)` block:
 
 ```java
-    sendWhenPossible(
-        new OutboundMessage(
-            OutboundMessage.Kind.SUBSCRIBE_FEED, null, ASSET_CONTEXTS_SUBSCRIBE_JSON),
-        openingGeneration,
-        Long.MAX_VALUE,
-        openingInitial ? null : connectionPermit);
+    if (sendsAssetContextFeed()) {
+      sendWhenPossible(
+          new OutboundMessage(
+              OutboundMessage.Kind.SUBSCRIBE_FEED, null, ASSET_CONTEXTS_SUBSCRIBE_JSON),
+          openingGeneration,
+          Long.MAX_VALUE,
+          openingInitial ? null : connectionPermit);
+    }
 ```
+
+`MarketDataSource` is in the connector's own package, so no import is needed. The asset-context
+connector added in Task 7 starts with `SourceProfile.of(MarketDataSource.HYPERLIQUID, MAINNET)`, so
+it always sends the frame.
 
 No other change is needed: `isMessageRelevant`, `sendWhenPossible`'s expiry branch, and `sendSucceeded` all key off `Kind.SUBSCRIBE`, so `SUBSCRIBE_FEED` never reaches the `desired` `TreeMap` with a null key.
 
@@ -895,9 +918,13 @@ Expected: PASS for the two new tests. Existing connector tests that count pendin
 
 - [ ] **Step 6: Flush the feed frame in every session fixture**
 
-Each session-level fixture opens a socket and then completes a fixed number of sends. The feed frame is now the first pending send, so flush it at every open.
+Each session-level fixture opens a socket and then completes a fixed number of sends. On a
+**Hyperliquid** source the feed frame is now the first pending send, so flush it at every open. On a
+relay source nothing changes, because Step 4 gates the frame on the source.
 
-In `HyperliquidSessionTickSizeTest.Fixture`, `HyperliquidSessionSubscriptionTest`, `HyperliquidSessionDeltaBookTest`, `HyperliquidSessionLifecycleTest`, and `ProviderEndToEndTest`, replace every occurrence of
+In `HyperliquidSessionSubscriptionTest`, `HyperliquidSessionLifecycleTest`, and
+`ProviderEndToEndTest` — all of which log in with `MarketDataSource.HYPERLIQUID` — replace every
+occurrence of
 
 ```java
       transport.openSocket();
@@ -914,6 +941,22 @@ with
 ```
 
 Where a test opens a socket without a following `drain()`, add both lines after the existing `openSocket()` call. `HyperliquidSessionLifecycleTest` has twelve such call sites (initial connects and reconnects); update all of them.
+
+`HyperliquidSessionTickSizeTest.Fixture` takes the source as a constructor argument and is
+instantiated with `HYPERLIQUID`, `BORSA` and `HYPERDASH`, so its single open site becomes:
+
+```java
+      transport.openSocket();
+      drain();
+      if (source == MarketDataSource.HYPERLIQUID) {
+        transport.socket().succeedNextSend();
+        drain();
+      }
+```
+
+Keep the constructor argument in a field if the fixture does not already retain it.
+
+`HyperliquidSessionDeltaBookTest` logs in with `BORSA` only; leave its three open sites unchanged.
 
 - [ ] **Step 7: Run the whole suite**
 
@@ -1606,7 +1649,7 @@ Borsa and Hyperdash both reject `fastAssetCtxs`, so those sources need a second 
   - `interface AssetContextConnectorFactory { HyperliquidConnector create(); }` (package-private, in `session`).
   - `final class AssetContextFeed` (package-private) with `void start()` and `void close()`.
   - A ninth `HyperliquidSession` constructor parameter `AssetContextConnectorFactory assetContextConnectorFactory`, placed immediately before `Runnable afterClose`.
-  - `FakeHyperliquidTransport.openConnection(int index)` and `FakeHyperliquidTransport.failConnection(int index, Throwable failure)`.
+  - `FakeHyperliquidTransport.openConnection(int index)`, `FakeHyperliquidTransport.failConnection(int index, Throwable failure)`, and `FakeHyperliquidTransport.remoteCloseConnection(int index, int code, String reason)`.
 
 - [ ] **Step 1: Add the targeted connection controls to the fake transport**
 
@@ -1624,6 +1667,23 @@ In `FakeHyperliquidTransport`, add next to `openSocket()`:
   public void failConnection(int connectionIndex, Throwable failure) {
     connectHandles.get(connectionIndex).completed = true;
     socketCallbacks.get(connectionIndex).onFailure(failure);
+  }
+
+  /** Closes one specific connection without disturbing the others. */
+  public void remoteCloseConnection(int connectionIndex, int code, String reason) {
+    connectHandles.get(connectionIndex).completed = true;
+    socket.open = false;
+    socketCallbacks.get(connectionIndex).onClose(code, reason);
+  }
+```
+
+Also count transport closes, so a test can prove the borrowed transport is closed exactly once. Add
+`private int closeCount;` with the other fields, increment it at the top of the existing `close()`,
+and expose it:
+
+```java
+  public int closeCount() {
+    return closeCount;
   }
 ```
 
@@ -1691,15 +1751,23 @@ public class AssetContextFeedTest {
     assertEquals("87.785", fixture.sink.lastReferencePrice("HYPE"));
   }
 
-  /** The feed answers its own pong so its heartbeat never tears the connection down. */
+  /**
+   * The feed answers its own pong so its heartbeat never tears the connection down. Both connectors
+   * ping on the same 30 s cadence and share one fake socket, so both pings are flushed and both
+   * pongs delivered; without {@code acceptPong} on the feed connector its 15 s pong deadline fires
+   * and the reconnect shows up as an extra connect call.
+   */
   @Test
   public void feedAnswersItsOwnPong() {
     Fixture fixture = new Fixture(MarketDataSource.BORSA);
     int connectionsBefore = fixture.transport.connectCalls().size();
 
     fixture.advance(30_000L);
-    fixture.transport.socket().succeedNextSend();
-    fixture.drain();
+    while (fixture.transport.socket().pendingSendCount() > 0) {
+      fixture.transport.socket().succeedNextSend();
+      fixture.drain();
+    }
+    fixture.transport.emitTextFromConnection(0, "{\"channel\":\"pong\"}");
     fixture.transport.emitTextFromConnection(1, "{\"channel\":\"pong\"}");
     fixture.drain();
     fixture.advance(20_000L);
@@ -1729,8 +1797,6 @@ public class AssetContextFeedTest {
     fixture.advance(1_000L);
     fixture.transport.openConnection(2);
     fixture.drain();
-    fixture.transport.socket().succeedNextSend();
-    fixture.drain();
     fixture.transport.emitTextFromConnection(
         1, TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"87.785\"}}"));
     fixture.drain();
@@ -1747,6 +1813,19 @@ public class AssetContextFeedTest {
     fixture.drain();
 
     assertFalse(fixture.transport.closed());
+  }
+
+  /** Closing the session settles both connections and closes the shared transport exactly once. */
+  @Test
+  public void sessionCloseSettlesBothConnectionsAndClosesTheTransportOnce() {
+    Fixture fixture = new Fixture(MarketDataSource.BORSA);
+
+    fixture.session.close();
+    fixture.drain();
+
+    assertTrue(fixture.transport.closed());
+    assertEquals(1, fixture.transport.closeCount());
+    assertTrue(fixture.transport.allConnectHandlesSettled());
   }
 
   /** RecordingSessionSink appends the failure reason, so events are matched by prefix. */
@@ -1828,8 +1907,11 @@ public class AssetContextFeedTest {
       for (int index = 0; index < transport.connectCalls().size(); index++) {
         transport.openConnection(index);
         drain();
-        transport.socket().succeedNextSend();
-        drain();
+        // Only a Hyperliquid connection subscribes to the feed, so a relay's index 0 sends nothing.
+        if (transport.socket().pendingSendCount() > 0) {
+          transport.socket().succeedNextSend();
+          drain();
+        }
       }
     }
 
@@ -2124,9 +2206,16 @@ final class AssetContextFeed implements HyperliquidConnector.Listener, AutoClose
 
   @Override
   public void onFrame(final long generation, String json) {
+    // Runs on the WebSocket callback thread: parse here, but publish only through the state lane.
     ParsedFrame frame = parser.parse(json);
-    for (String diagnostic : frame.diagnostics()) {
-      diagnostics.accept("asset-context feed: " + diagnostic);
+    for (final String diagnostic : frame.diagnostics()) {
+      stateLane.accept(
+          new Runnable() {
+            @Override
+            public void run() {
+              diagnostics.accept("asset-context feed: " + diagnostic);
+            }
+          });
     }
     for (ControlEvent event : frame.controlEvents()) {
       if (event.kind() == ControlEvent.Kind.PONG) {
@@ -2190,10 +2279,19 @@ next to `profile`.
 
 Add `AssetContextConnectorFactory assetContextConnectorFactory` to the constructor signature immediately before `Runnable afterClose`, include it in the null check, and assign it.
 
-In `handleLogin`, start the feed for relay sources right after `connector.start(newProfile);`:
+Start the feed at the **end of `onMetadata`**, not in `handleLogin`. Two reasons: `onAssetContexts`
+drops everything while `metadataReceived` is false, and the feed clears its own `snapshotPending`
+when it hands a frame over — a snapshot that arrives before metadata would be lost for good, leaving
+the store permanently partial until the next reconnect. Starting after metadata also puts the relay's
+market-data connection at connection index 0 and the feed at index 1, which is the order the tests
+below assert.
+
+Append to `onMetadata`, after `sink.onKnownInstruments(...)`:
 
 ```java
-      if (newProfile.source() != MarketDataSource.HYPERLIQUID && assetContextFeed == null) {
+      if (profile != null
+          && profile.source() != MarketDataSource.HYPERLIQUID
+          && assetContextFeed == null) {
         HyperliquidConnector feedConnector = assetContextConnectorFactory.create();
         if (feedConnector == null) {
           sink.onDiagnostic("asset-context feed unavailable; tick candidates stay on the grid");
@@ -2239,7 +2337,15 @@ Add the import `com.bookmap.plugins.layer0.hyperliquid.session.AssetContextConne
 
 - [ ] **Step 8: Update the other session fixtures for the new constructor parameter**
 
-`HyperliquidSessionTickSizeTest`, `HyperliquidSessionLifecycleTest`, `HyperliquidSessionSubscriptionTest`, `HyperliquidSessionDeltaBookTest` and `HyperliquidSessionAssetContextTest` all construct `HyperliquidSession` directly. In each, insert the argument before the `afterClose` runnable:
+Six test classes construct `HyperliquidSession` directly: `HyperliquidSessionTickSizeTest`,
+`HyperliquidSessionLifecycleTest`, `HyperliquidSessionSubscriptionTest`,
+`HyperliquidSessionDeltaBookTest`, `HyperliquidSessionAssetContextTest`, and the anonymous
+`HyperliquidSessionFactory` inside `ProviderEndToEndTest.Fixture`. Each needs the new argument
+before the `afterClose` runnable.
+
+`HyperliquidSessionLifecycleTest`, `HyperliquidSessionSubscriptionTest`,
+`HyperliquidSessionAssetContextTest` and `ProviderEndToEndTest` only ever log in with
+`MarketDataSource.HYPERLIQUID`, so the factory is never called there. Give those four:
 
 ```java
             new AssetContextConnectorFactory() {
@@ -2250,7 +2356,26 @@ Add the import `com.bookmap.plugins.layer0.hyperliquid.session.AssetContextConne
             },
 ```
 
-`HyperliquidSessionAssetContextTest` and the four others all log in with `MarketDataSource.HYPERLIQUID`, so the factory is never called. `HyperliquidSessionDeltaBookTest` logs in with Borsa; give that one a factory that returns a non-owning connector on the shared transport, exactly as in the Task 7 fixture, and open the extra connection in its fixture with the `openConnection` loop.
+`HyperliquidSessionDeltaBookTest` logs in with Borsa, and `HyperliquidSessionTickSizeTest` is
+parameterised by source and is instantiated with Borsa and Hyperdash as well as Hyperliquid. Both
+need a real factory that returns a non-owning connector on the shared transport, exactly as in the
+Task 7 fixture.
+
+Because the feed adds a second connection for a relay source, the *initial* connect in those two
+fixtures can no longer use `transport.openSocket()` / `transport.remoteClose(...)`, which act on the
+**last** connect handle — after Step 6 that is the feed (index 1), not the market-data connection
+(index 0). Fix the initial-connect sites only:
+
+| File | Site | Change |
+|---|---|---|
+| `HyperliquidSessionTickSizeTest.Fixture` | the single `transport.openSocket()` | `transport.openConnection(0)` |
+| `HyperliquidSessionDeltaBookTest.Fixture.login()` | `transport.openSocket()` | `transport.openConnection(0)` |
+| `HyperliquidSessionDeltaBookTest.Fixture.beginRecovery()` | `transport.remoteClose(1006, "lost")` | `transport.remoteCloseConnection(0, 1006, "lost")` |
+
+Leave the two reconnect sites (`beginRecovery()`'s `openSocket()` and the one after
+`onMarketOverflow()`) alone: a reconnect creates connect handle 2, which is the last one again. Leave
+the feed connection (index 1) unopened; neither fixture asserts anything about it, and `close()`
+still settles its handle.
 
 - [ ] **Step 9: Run test to verify it passes**
 
