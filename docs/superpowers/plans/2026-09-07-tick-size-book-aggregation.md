@@ -393,7 +393,7 @@ Expected: PASS
 
 - [ ] **Step 6: Update every test fixture that fakes metadata**
 
-Run `grep -rn '"universe"' src/test/java --include=*.java | grep -v HyperliquidMetaParserTest | grep -v TestMetadata` and convert every hit so the string passed to `completeMeta` / `lateCompleteMeta` is wrapped. Concretely:
+Run `grep -rn 'universe' src/test/java --include=*.java | grep -v HyperliquidMetaParserTest | grep -v TestMetadata` (the Java sources spell it `\"universe\"`, so do not quote it in the pattern) and convert every hit so the string passed to `completeMeta` / `lateCompleteMeta` is wrapped. Concretely:
 
 - `HyperliquidConnectorTest`: line 38 becomes `assertEquals("{\"type\":\"metaAndAssetCtxs\"}", fixture.transport.httpBody());`; `validMeta(String coin)` returns `TestMetadata.wrap(TestMetadata.universe(coin))`. Convert any other inline `"{\"universe\":...}"` literal in this file with `TestMetadata.wrap(...)`.
 - `ProviderEndToEndTest`: replace the private `metadata(String... symbols)` body with `return TestMetadata.wrap(TestMetadata.universe(symbols));`.
@@ -407,7 +407,7 @@ Empty contexts leave `referencePrice` null, so every existing expectation (nativ
 - [ ] **Step 7: Run the whole test suite**
 
 Run: `env JAVA_HOME=/home/dev/Downloads/jdk-21.0.12.1 ./gradlew --offline test`
-Expected: PASS. If a test still fails with `metadata response must be a two-element array`, its fixture was missed in Step 6.
+Expected: PASS. If a test still fails with `metadata response must be a two-element array`, its fixture was missed in Step 6. Also run `grep -rn 'completeMeta\|lateCompleteMeta' src/test/java` and confirm every argument goes through `TestMetadata.wrap`.
 
 - [ ] **Step 8: Format and commit**
 
