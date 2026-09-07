@@ -175,9 +175,6 @@ public class HyperliquidMessageParserTest {
             + "\"subscription\":{\"type\":\"unknown\",\"coin\":\"BTC\"}}}");
     assertInvalid(
         "{\"channel\":\"subscriptionResponse\",\"data\":{\"method\":\"subscribe\","
-            + "\"subscription\":{\"type\":\"l2Book\"}}}");
-    assertInvalid(
-        "{\"channel\":\"subscriptionResponse\",\"data\":{\"method\":\"subscribe\","
             + "\"subscription\":{\"type\":\"l2Book\",\"coin\":\"BTC\",\"dex\":\"x\"}}}");
   }
 
@@ -313,5 +310,67 @@ public class HyperliquidMessageParserTest {
     assertEquals(
         new SubscriptionKey("BTC", SubscriptionType.L2_BOOK),
         frame.controlEvents().get(0).target());
+  }
+
+  /** Accepts a fastAssetCtxs frame and exposes the decoded mark prices. */
+  @Test
+  public void acceptsAssetContextFrame() {
+    ParsedFrame frame =
+        parser.parse(
+            "{\"channel\":\"fastAssetCtxs\",\"data\":\""
+                + "q1ZyCnFWsqpWyk0syg6oULJSMrc0tjTRM1DSUcrNTIGJWBjqmSrV6ihVVFZZOfugqLc00jOyMEZSDhYw"
+                + "UqqtBQA=\"}");
+
+    assertEquals(ParsedFrame.Disposition.ACCEPTED, frame.disposition());
+    assertEquals(1, frame.controlEvents().size());
+    ControlEvent event = frame.controlEvents().get(0);
+    assertEquals(ControlEvent.Kind.ASSET_CONTEXTS, event.kind());
+    assertEquals(0, new BigDecimal("92.283").compareTo(event.markPrices().get("xyz:CL")));
+    assertTrue(frame.marketEvents().isEmpty());
+  }
+
+  /** Rejects a fastAssetCtxs frame whose payload cannot be decoded, without emitting events. */
+  @Test
+  public void rejectsUndecodableAssetContextFrame() {
+    ParsedFrame frame = parser.parse("{\"channel\":\"fastAssetCtxs\",\"data\":\"////////\"}");
+
+    assertEquals(ParsedFrame.Disposition.INVALID, frame.disposition());
+    assertTrue(frame.controlEvents().isEmpty());
+  }
+
+  /** Ignores the ack for a connection-scoped subscription, which carries no coin. */
+  @Test
+  public void ignoresCoinlessSubscriptionAck() {
+    ParsedFrame frame =
+        parser.parse(
+            "{\"channel\":\"subscriptionResponse\",\"data\":{\"method\":\"subscribe\","
+                + "\"subscription\":{\"type\":\"fastAssetCtxs\"}}}");
+
+    assertEquals(ParsedFrame.Disposition.IGNORED, frame.disposition());
+    assertTrue(frame.controlEvents().isEmpty());
+  }
+
+  /** Reports a rejected feed subscription as a diagnostic, never as a per-instrument error. */
+  @Test
+  public void reportsFeedSubscriptionErrorAsDiagnostic() {
+    ParsedFrame frame =
+        parser.parse(
+            "{\"channel\":\"error\",\"data\":\"Invalid subscription "
+                + "{\\\"type\\\":\\\"fastAssetCtxs\\\"}\"}");
+
+    assertEquals(ParsedFrame.Disposition.IGNORED, frame.disposition());
+    assertTrue(frame.controlEvents().isEmpty());
+    assertEquals(1, frame.diagnostics().size());
+    assertTrue(frame.diagnostics().get(0), frame.diagnostics().get(0).contains("fastAssetCtxs"));
+  }
+
+  /** Keeps reporting an untargeted non-feed error as a subscription error. */
+  @Test
+  public void keepsUntargetedErrorAsSubscriptionError() {
+    ParsedFrame frame = parser.parse("{\"channel\":\"error\",\"data\":\"Already subscribed\"}");
+
+    assertEquals(ParsedFrame.Disposition.ACCEPTED, frame.disposition());
+    assertEquals(1, frame.controlEvents().size());
+    assertEquals(ControlEvent.Kind.SUBSCRIPTION_ERROR, frame.controlEvents().get(0).kind());
   }
 }

@@ -23,6 +23,8 @@ public final class HyperliquidMessageParser {
 
   private static final long MAX_TID = (1L << 50) - 1L;
 
+  private final AssetContextCodec assetContextCodec = new AssetContextCodec();
+
   /** Parses one WebSocket message without propagating malformed-input failures. */
   public ParsedFrame parse(String json) {
     try {
@@ -37,6 +39,9 @@ public final class HyperliquidMessageParser {
       }
       if ("l2Book".equals(channel)) {
         return parseL2Book(object);
+      }
+      if ("fastAssetCtxs".equals(channel)) {
+        return parseAssetContexts(object);
       }
       if ("subscriptionResponse".equals(channel)) {
         return parseSubscriptionResponse(object);
@@ -148,7 +153,12 @@ public final class HyperliquidMessageParser {
     if (subscription == null || !subscription.isJsonObject()) {
       throw new ProtocolException("subscription response must contain a subscription object");
     }
-    SubscriptionKey key = parseSubscription(subscription.getAsJsonObject());
+    JsonObject subscriptionObject = subscription.getAsJsonObject();
+    if (!subscriptionObject.has("coin")) {
+      // Connection-scoped feeds such as fastAssetCtxs acknowledge without a coin.
+      return ParsedFrame.ignored(Collections.<String>emptyList());
+    }
+    SubscriptionKey key = parseSubscription(subscriptionObject);
     if ("unsubscribe".equals(method)) {
       return ParsedFrame.ignored(Collections.<String>emptyList());
     }
@@ -175,7 +185,23 @@ public final class HyperliquidMessageParser {
         }
       }
     }
+    if (target == null && data != null && data.toString().contains("fastAssetCtxs")) {
+      return ParsedFrame.ignored(
+          Collections.singletonList("fastAssetCtxs subscription rejected: " + data));
+    }
     ControlEvent event = new ControlEvent(ControlEvent.Kind.SUBSCRIPTION_ERROR, target);
+    return ParsedFrame.accepted(
+        Collections.<MarketDataEvent>emptyList(),
+        Collections.singletonList(event),
+        Collections.<String>emptyList());
+  }
+
+  private ParsedFrame parseAssetContexts(JsonObject object) throws ProtocolException {
+    JsonElement data = object.get("data");
+    if (data == null || !data.isJsonPrimitive() || !data.getAsJsonPrimitive().isString()) {
+      throw new ProtocolException("fastAssetCtxs data must be a string");
+    }
+    ControlEvent event = ControlEvent.assetContexts(assetContextCodec.decode(data.getAsString()));
     return ParsedFrame.accepted(
         Collections.<MarketDataEvent>emptyList(),
         Collections.singletonList(event),
