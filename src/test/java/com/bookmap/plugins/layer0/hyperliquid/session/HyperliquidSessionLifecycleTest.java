@@ -137,6 +137,8 @@ public class HyperliquidSessionLifecycleTest {
     fixture.transport.openSocket();
     fixture.generation = 2L;
     fixture.drain();
+    fixture.transport.socket().succeedNextSend();
+    fixture.drain();
     fixture.completeSends(1);
     fixture.ack(SubscriptionType.L2_BOOK);
     fixture.drain();
@@ -169,6 +171,8 @@ public class HyperliquidSessionLifecycleTest {
     fixture.drain();
     fixture.transport.openSocket();
     fixture.generation = 2L;
+    fixture.drain();
+    fixture.transport.socket().succeedNextSend();
     fixture.drain();
     fixture.completeSends(4);
     fixture.book("BTC", "101.000", 2L);
@@ -208,6 +212,8 @@ public class HyperliquidSessionLifecycleTest {
     fixture.transport.openSocket();
     fixture.generation = 2L;
     fixture.drain();
+    fixture.transport.socket().succeedNextSend();
+    fixture.drain();
     fixture.scheduler.advanceBy(10_000L);
     fixture.drain();
 
@@ -233,6 +239,8 @@ public class HyperliquidSessionLifecycleTest {
     fixture.drain();
     fixture.transport.openSocket();
     fixture.generation = 2L;
+    fixture.drain();
+    fixture.transport.socket().succeedNextSend();
     fixture.drain();
     int connectCalls = fixture.transport.connectCalls().size();
 
@@ -265,6 +273,8 @@ public class HyperliquidSessionLifecycleTest {
     fixture.drain();
     fixture.transport.openSocket();
     fixture.generation = 2L;
+    fixture.drain();
+    fixture.transport.socket().succeedNextSend();
     fixture.drain();
     fixture.completeSends(2);
     fixture.book("101.000", 2L);
@@ -353,6 +363,8 @@ public class HyperliquidSessionLifecycleTest {
     fixture.drain();
     fixture.transport.socket().succeedNextSend();
     fixture.drain();
+    fixture.transport.socket().succeedNextSend();
+    fixture.drain();
     fixture.scheduler.advanceBy(10_000L);
     fixture.drain();
 
@@ -377,6 +389,8 @@ public class HyperliquidSessionLifecycleTest {
     fixture.drain();
     fixture.transport.openSocket();
     fixture.generation = 2L;
+    fixture.drain();
+    fixture.transport.socket().succeedNextSend();
     fixture.drain();
     fixture.scheduler.advanceBy(9_999L);
     fixture.transport.socket().succeedNextSend();
@@ -435,6 +449,8 @@ public class HyperliquidSessionLifecycleTest {
     fixture.transport.openSocket();
     fixture.generation = 3L;
     fixture.drain();
+    fixture.transport.socket().succeedNextSend();
+    fixture.drain();
 
     int eventsBeforeStaleCallbacks = fixture.sink.events().size();
     int connectsBeforeStaleCallbacks = fixture.transport.connectCalls().size();
@@ -482,6 +498,8 @@ public class HyperliquidSessionLifecycleTest {
     fixture.drain();
     fixture.transport.openSocket();
     fixture.generation = 3L;
+    fixture.drain();
+    fixture.transport.socket().succeedNextSend();
     fixture.drain();
     for (int index = 0; index < 4_096; index++) {
       assertTrue(
@@ -708,6 +726,8 @@ public class HyperliquidSessionLifecycleTest {
       drain();
       transport.openSocket();
       drain();
+      transport.socket().succeedNextSend();
+      drain();
     }
 
     private void startLogin() {
@@ -727,6 +747,8 @@ public class HyperliquidSessionLifecycleTest {
       drain();
       transport.openSocket();
       generation = 2L;
+      drain();
+      transport.socket().succeedNextSend();
       drain();
     }
 

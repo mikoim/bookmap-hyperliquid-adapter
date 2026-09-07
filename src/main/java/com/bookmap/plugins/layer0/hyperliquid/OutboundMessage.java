@@ -9,20 +9,23 @@ public final class OutboundMessage {
   public enum Kind {
     SUBSCRIBE,
     UNSUBSCRIBE,
-    PING
+    PING,
+    SUBSCRIBE_FEED
   }
 
   private final Kind kind;
   private final SubscriptionKey subscription;
   private final String body;
 
-  /** Creates an outbound JSON message. PING messages have no subscription. */
+  /** Creates an outbound JSON message. PING and SUBSCRIBE_FEED messages have no subscription. */
   public OutboundMessage(Kind kind, SubscriptionKey subscription, String body) {
     if (kind == null || body == null) {
       throw new IllegalArgumentException("kind and body must not be null");
     }
-    if ((kind == Kind.PING) != (subscription == null)) {
-      throw new IllegalArgumentException("only PING messages may omit a subscription");
+    boolean connectionScoped = kind == Kind.PING || kind == Kind.SUBSCRIBE_FEED;
+    if (connectionScoped != (subscription == null)) {
+      throw new IllegalArgumentException(
+          "only PING and SUBSCRIBE_FEED messages may omit a subscription");
     }
     this.kind = kind;
     this.subscription = subscription;

@@ -191,6 +191,7 @@ public class HyperliquidSessionTickSizeTest {
   }
 
   private static final class Fixture {
+    private final MarketDataSource source;
     private final ManualExecutor executor = new ManualExecutor();
     private final MutableClock clock = new MutableClock();
     private final TestScheduler scheduler = new TestScheduler(clock);
@@ -222,6 +223,7 @@ public class HyperliquidSessionTickSizeTest {
      * Logs in with one HYPE instrument (szDecimals 2) whose markPx is the given string or absent.
      */
     Fixture(MarketDataSource source, String markPx) {
+      this.source = source;
       session.login(SourceProfile.of(source, HyperliquidEnvironment.MAINNET));
       drain();
       transport.completeMeta(
@@ -229,6 +231,10 @@ public class HyperliquidSessionTickSizeTest {
       drain();
       transport.openSocket();
       drain();
+      if (source == MarketDataSource.HYPERLIQUID) {
+        transport.socket().succeedNextSend();
+        drain();
+      }
       sink.events().clear();
     }
 

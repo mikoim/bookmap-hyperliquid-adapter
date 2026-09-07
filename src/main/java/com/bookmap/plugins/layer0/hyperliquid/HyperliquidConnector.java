@@ -40,6 +40,9 @@ public final class HyperliquidConnector implements AutoCloseable {
     1_000L, 2_000L, 4_000L, 8_000L, 16_000L, 32_000L, 60_000L
   };
 
+  static final String ASSET_CONTEXTS_SUBSCRIBE_JSON =
+      "{\"method\":\"subscribe\",\"subscription\":{\"type\":\"fastAssetCtxs\"}}";
+
   /** Receives lifecycle events emitted by the connector. */
   public interface Listener {
 
@@ -331,7 +334,7 @@ public final class HyperliquidConnector implements AutoCloseable {
       return;
     }
     long now = clock.getAsLong();
-    int reservedFrames = initial ? 0 : desired.size() + 1;
+    int reservedFrames = initial ? 0 : reservedFrameCount();
     Decision<ConnectionPermit> decision = budget.tryAcquireConnection(now, reservedFrames);
     if (!decision.acquired()) {
       boolean socketSlotBlocked = initial && reservedFrames == 0 && decision.retryAtMillis() == now;
@@ -449,7 +452,7 @@ public final class HyperliquidConnector implements AutoCloseable {
       return;
     }
     removeExpiredSubscriptions(clock.getAsLong());
-    if (!openingInitial && connectionPermit.reservedFramesRemaining() > desired.size() + 1) {
+    if (!openingInitial && connectionPermit.reservedFramesRemaining() > reservedFrameCount()) {
       openedSocket.close(1000, "reconnect reservation changed");
       replaceReconnectOpening();
       return;
@@ -461,6 +464,14 @@ public final class HyperliquidConnector implements AutoCloseable {
     handshakeDeadline = null;
     connectRequest = null;
     listener.onSocketOpened(openingGeneration);
+    if (sendsAssetContextFeed()) {
+      sendWhenPossible(
+          new OutboundMessage(
+              OutboundMessage.Kind.SUBSCRIBE_FEED, null, ASSET_CONTEXTS_SUBSCRIBE_JSON),
+          openingGeneration,
+          Long.MAX_VALUE,
+          openingInitial ? null : connectionPermit);
+    }
     if (!openingInitial) {
       for (SubscriptionKey key : desired.values()) {
         sendWhenPossible(
@@ -793,6 +804,15 @@ public final class HyperliquidConnector implements AutoCloseable {
   private long activationDeadlineFor(SubscriptionKey key) {
     Long deadline = activationDeadlines.get(key);
     return deadline == null ? Long.MAX_VALUE : deadline.longValue();
+  }
+
+  /** Only Hyperliquid serves fastAssetCtxs; the relays reject the subscription outright. */
+  private boolean sendsAssetContextFeed() {
+    return profile != null && profile.source() == MarketDataSource.HYPERLIQUID;
+  }
+
+  private int reservedFrameCount() {
+    return desired.size() + (sendsAssetContextFeed() ? 2 : 1);
   }
 
   private void removeExpiredSubscriptions(long nowMillis) {

@@ -812,6 +812,8 @@ public class HyperliquidSessionSubscriptionTest {
       drain();
       transport.openSocket();
       drain();
+      transport.socket().succeedNextSend();
+      drain();
     }
 
     void activateBtc() {

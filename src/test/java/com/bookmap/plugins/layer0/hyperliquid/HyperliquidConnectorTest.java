@@ -99,6 +99,7 @@ public class HyperliquidConnectorTest {
   public void reconnectsWithBackoffAndResendsEveryDesiredDefinition() {
     Fixture fixture = new Fixture();
     fixture.startAndOpen();
+    fixture.transport.socket().succeedNextSend();
     fixture.connector.subscribe(new SubscriptionKey("BTC", SubscriptionType.L2_BOOK), 20_000L);
     fixture.transport.socket().succeedNextSend();
     fixture.connector.subscribe(new SubscriptionKey("BTC", SubscriptionType.TRADES), 20_000L);
@@ -113,8 +114,10 @@ public class HyperliquidConnectorTest {
     fixture.transport.openSocket();
     fixture.transport.socket().succeedNextSend();
     fixture.transport.socket().succeedNextSend();
+    fixture.transport.socket().succeedNextSend();
     assertEquals(
         Arrays.asList(
+            HyperliquidConnector.ASSET_CONTEXTS_SUBSCRIBE_JSON,
             "{\"method\":\"subscribe\",\"subscription\":{\"type\":\"l2Book\",\"coin\":\"BTC\"}}",
             "{\"method\":\"subscribe\",\"subscription\":{\"type\":\"trades\",\"coin\":\"BTC\"}}"),
         fixture.transport.socket().successfulSendBodies());
@@ -124,6 +127,7 @@ public class HyperliquidConnectorTest {
   public void acknowledgementUsesTimeCapturedWhenSendStarts() {
     Fixture fixture = new Fixture();
     fixture.startAndOpen();
+    fixture.transport.socket().succeedNextSend();
     fixture.clock.now = 500L;
     SubscriptionKey key = new SubscriptionKey("BTC", SubscriptionType.L2_BOOK);
 
@@ -131,14 +135,15 @@ public class HyperliquidConnectorTest {
     fixture.clock.now = 900L;
     fixture.transport.socket().succeedNextSend();
 
-    assertEquals(1, fixture.listener.sentTimes.size());
-    assertEquals(Long.valueOf(500L), fixture.listener.sentTimes.get(0));
+    assertEquals(2, fixture.listener.sentTimes.size());
+    assertEquals(Long.valueOf(500L), fixture.listener.sentTimes.get(1));
   }
 
   @Test
   public void pingStartsAtThirtySecondsAndMissingPongReconnects() {
     Fixture fixture = new Fixture();
     fixture.startAndOpen();
+    fixture.transport.socket().succeedNextSend();
 
     fixture.clock.now = 30_000L;
     fixture.scheduler.advanceBy(30_000L);
@@ -317,11 +322,12 @@ public class HyperliquidConnectorTest {
 
   @Test
   public void reconnectReservationIsReplacedWhenAConnectionSubscriptionIsAdded() {
-    HyperliquidProcessBudget budget = newBudget(2, 10, 4, 2);
+    HyperliquidProcessBudget budget = newBudget(2, 10, 6, 2);
     Fixture fixture = new Fixture(budget);
     SubscriptionKey book = new SubscriptionKey("BTC", SubscriptionType.L2_BOOK);
     SubscriptionKey trades = new SubscriptionKey("BTC", SubscriptionType.TRADES);
     fixture.startAndOpen();
+    fixture.transport.socket().succeedNextSend();
     fixture.connector.subscribe(book, 20_000L);
     fixture.transport.socket().succeedNextSend();
     fixture.transport.remoteClose(1006, "lost");
@@ -334,6 +340,7 @@ public class HyperliquidConnectorTest {
     fixture.transport.openSocket();
     fixture.transport.socket().succeedNextSend();
     fixture.transport.socket().succeedNextSend();
+    fixture.transport.socket().succeedNextSend();
     fixture.clock.now = 31_000L;
     fixture.scheduler.advanceBy(30_000L);
 
@@ -343,11 +350,12 @@ public class HyperliquidConnectorTest {
 
   @Test
   public void expiredAddedSubscriptionIsNotReplayedAfterReconnectReplacement() {
-    HyperliquidProcessBudget budget = newBudget(2, 10, 4, 2);
+    HyperliquidProcessBudget budget = newBudget(2, 10, 6, 2);
     Fixture fixture = new Fixture(budget);
     SubscriptionKey book = new SubscriptionKey("BTC", SubscriptionType.L2_BOOK);
     SubscriptionKey trades = new SubscriptionKey("BTC", SubscriptionType.TRADES);
     fixture.startAndOpen();
+    fixture.transport.socket().succeedNextSend();
     fixture.connector.subscribe(book, 20_000L);
     fixture.transport.socket().succeedNextSend();
     fixture.transport.remoteClose(1006, "lost");
@@ -359,7 +367,8 @@ public class HyperliquidConnectorTest {
     fixture.transport.openSocket();
     fixture.transport.openSocket();
 
-    assertEquals(1, fixture.transport.socket().pendingSendCount());
+    assertEquals(2, fixture.transport.socket().pendingSendCount());
+    fixture.transport.socket().succeedNextSend();
     fixture.transport.socket().succeedNextSend();
 
     assertTrue(fixture.transport.socket().successfulSendBodies().contains(book.subscribeJson()));
@@ -438,6 +447,41 @@ public class HyperliquidConnectorTest {
 
     assertEquals("wss://ws.borsa.cc/", fixture.transport.connectCalls().get(0).toString());
     assertTrue(fixture.transport.connectHeaders().get(0).isEmpty());
+  }
+
+  /** Every opened generation subscribes to the asset-context feed before anything else. */
+  @Test
+  public void opensEachGenerationWithTheAssetContextSubscription() {
+    Fixture fixture = new Fixture();
+
+    fixture.startAndOpen();
+    fixture.transport.socket().succeedNextSend();
+
+    assertEquals(
+        Arrays.asList(HyperliquidConnector.ASSET_CONTEXTS_SUBSCRIBE_JSON),
+        fixture.transport.socket().successfulSendBodies());
+  }
+
+  /** The feed subscription precedes restored instrument subscriptions after a reconnect. */
+  @Test
+  public void assetContextSubscriptionPrecedesRestoredSubscriptions() {
+    Fixture fixture = new Fixture();
+    fixture.startAndOpen();
+    fixture.transport.socket().succeedNextSend();
+    fixture.connector.subscribe(
+        new SubscriptionKey("BTC", SubscriptionType.L2_BOOK), Long.MAX_VALUE);
+    fixture.transport.socket().succeedNextSend();
+    fixture.transport.clearSuccessfulSendBodies();
+
+    fixture.connector.reconnect(null);
+    fixture.advanceAndOpen(1_000L);
+    fixture.transport.socket().succeedNextSend();
+    fixture.transport.socket().succeedNextSend();
+
+    List<String> bodies = fixture.transport.socket().successfulSendBodies();
+    assertEquals(2, bodies.size());
+    assertEquals(HyperliquidConnector.ASSET_CONTEXTS_SUBSCRIBE_JSON, bodies.get(0));
+    assertTrue(bodies.get(1), bodies.get(1).contains("\"coin\":\"BTC\""));
   }
 
   private static String validMeta(String coin) {

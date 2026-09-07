@@ -149,6 +149,8 @@ public class ProviderEndToEndTest {
     fixture.advance(1_000L);
     fixture.transport.openSocket();
     fixture.drain();
+    fixture.transport.socket().succeedNextSend();
+    fixture.drain();
     assertEquals(2, fixture.transport.connectCalls().size());
     fixture.completeSends();
     fixture.ack("BTC", "l2Book");
@@ -201,6 +203,8 @@ public class ProviderEndToEndTest {
     fixture.advance(1_000L);
     fixture.transport.openSocket();
     fixture.drain();
+    fixture.transport.socket().succeedNextSend();
+    fixture.drain();
     fixture.completeSends();
     fixture.advance(9_001L);
     fixture.drain();
@@ -244,6 +248,8 @@ public class ProviderEndToEndTest {
     assertEquals(1, fixture.admin.connectionLostCount);
     fixture.advance(1_000L);
     fixture.transport.openSocket();
+    fixture.drain();
+    fixture.transport.socket().succeedNextSend();
     fixture.drain();
     fixture.completeSends();
     fixture.ack("BTC", "l2Book");
@@ -306,7 +312,7 @@ public class ProviderEndToEndTest {
 
   @Test
   public void sharedBudgetCapsConnectionsSubscriptionsAndFramesWithoutBlockingStateLanes() {
-    HyperliquidProcessBudget budget = budget(2, 20, 2, 4);
+    HyperliquidProcessBudget budget = budget(2, 20, 4, 4);
     Fixture first = new Fixture(budget);
     Fixture second = new Fixture(budget);
     first.login(HyperliquidEnvironment.MAINNET);
@@ -322,6 +328,8 @@ public class ProviderEndToEndTest {
     second.transport.completeMeta(200, metadata("BTC"));
     second.drain();
     second.transport.openSocket();
+    second.drain();
+    second.transport.socket().succeedNextSend();
     second.drain();
     second.subscribe("BTC");
     second.drain();
@@ -367,13 +375,15 @@ public class ProviderEndToEndTest {
     assertEquals(1, second.transport.connectCalls().size());
     second.transport.openSocket();
     second.drain();
+    second.transport.socket().succeedNextSend();
+    second.drain();
     second.closeTwice();
     second.assertClosed();
   }
 
   @Test
   public void sharedFrameWindowDefersProviderHeartbeatUntilExpiry() {
-    HyperliquidProcessBudget budget = budget(2, 20, 2, 2);
+    HyperliquidProcessBudget budget = budget(2, 20, 4, 2);
     Fixture first = new Fixture(budget);
     Fixture second = new Fixture(budget);
     first.login(HyperliquidEnvironment.MAINNET);
@@ -408,6 +418,8 @@ public class ProviderEndToEndTest {
     second.transport.completeMeta(200, metadata("BTC"));
     second.drain();
     second.transport.openSocket();
+    second.drain();
+    second.transport.socket().succeedNextSend();
     second.drain();
 
     first.subscribe("BTC");
@@ -680,6 +692,8 @@ public class ProviderEndToEndTest {
       drain();
       transport.openSocket();
       drain();
+      transport.socket().succeedNextSend();
+      drain();
     }
 
     private void loginWithPricedMetadata(String symbol, String markPx) {
@@ -688,6 +702,8 @@ public class ProviderEndToEndTest {
       transport.completeMeta(200, metadata(new String[] {symbol}, markPx));
       drain();
       transport.openSocket();
+      drain();
+      transport.socket().succeedNextSend();
       drain();
     }
 
