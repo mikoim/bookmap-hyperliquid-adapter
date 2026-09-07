@@ -21,6 +21,7 @@ import com.bookmap.plugins.layer0.hyperliquid.model.ParsedFrame;
 import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionKey;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionType;
+import com.bookmap.plugins.layer0.hyperliquid.model.SymbolLookup;
 import com.bookmap.plugins.layer0.hyperliquid.model.TickSizePlan;
 import com.bookmap.plugins.layer0.hyperliquid.model.TradeEvent;
 import com.bookmap.plugins.layer0.hyperliquid.model.ValueConversionException;
@@ -452,13 +453,13 @@ public final class HyperliquidSession
       sink.onInstrumentNotFound(symbol, exchange, type);
       return;
     }
-    if (records.containsKey(symbol)) {
-      sink.onInstrumentAlreadySubscribed(symbol, exchange, type);
-      return;
-    }
-    PerpetualInstrument instrument = instruments.get(symbol);
+    PerpetualInstrument instrument = SymbolLookup.resolve(instruments, symbol);
     if (instrument == null) {
       sink.onInstrumentNotFound(symbol, exchange, type);
+      return;
+    }
+    if (records.containsKey(instrument.symbol())) {
+      sink.onInstrumentAlreadySubscribed(symbol, exchange, type);
       return;
     }
     Decision<SubscriptionPermit> decision = budget.tryReserveSubscriptionPair(clock.getAsLong());
@@ -493,7 +494,7 @@ public final class HyperliquidSession
             profile.feedMode(),
             parameters,
             new PriceBucketer(instrument, resolvedTick));
-    records.put(symbol, record);
+    records.put(instrument.symbol(), record);
     record.setActivationTask(
         scheduler.schedule(
             new Runnable() {
@@ -503,10 +504,10 @@ public final class HyperliquidSession
                     new Runnable() {
                       @Override
                       public void run() {
-                        if (records.get(record.alias()) == record
+                        if (records.get(record.instrument().symbol()) == record
                             && record.state() == SubscriptionRecord.State.PENDING_BOOK) {
                           removeRecord(
-                              record.alias(),
+                              record.instrument().symbol(),
                               RemovalCause.TIMEOUT,
                               "subscription activation timed out");
                         }
@@ -520,8 +521,14 @@ public final class HyperliquidSession
   }
 
   private void handleUnsubscribe(String alias) {
-    if (!closed && alias != null && records.containsKey(alias)) {
-      removeRecord(alias, RemovalCause.USER, null);
+    if (closed || alias == null) {
+      return;
+    }
+    for (SubscriptionRecord record : records.values()) {
+      if (record.alias().equals(alias)) {
+        removeRecord(record.instrument().symbol(), RemovalCause.USER, null);
+        return;
+      }
     }
   }
 
@@ -632,7 +639,8 @@ public final class HyperliquidSession
       stop(StopCause.FATAL);
       return;
     }
-    removeRecord(record.alias(), RemovalCause.REJECTION, "Hyperliquid rejected subscription");
+    removeRecord(
+        record.instrument().symbol(), RemovalCause.REJECTION, "Hyperliquid rejected subscription");
   }
 
   private void handleMarketFrame(long generation, List<MarketDataEvent> events) {
@@ -664,7 +672,7 @@ public final class HyperliquidSession
     SnapshotValidation validation = record.diff().validate(snapshot, record.lastAcceptedBookTime());
     if (validation.status() == SnapshotValidation.Status.UNSUPPORTED_PRICE) {
       removeRecord(
-          record.alias(),
+          record.instrument().symbol(),
           RemovalCause.UNSUPPORTED_PRICE,
           "Hyperliquid book price is unsupported: " + validation.diagnostic());
       return;
@@ -723,7 +731,7 @@ public final class HyperliquidSession
   private boolean acceptDeltaResult(SubscriptionRecord record, DeltaOrderBook.Result result) {
     if (result.status() == DeltaOrderBook.Status.UNSUPPORTED_PRICE) {
       removeRecord(
-          record.alias(),
+          record.instrument().symbol(),
           RemovalCause.UNSUPPORTED_PRICE,
           "Hyperliquid book price is unsupported: " + result.diagnostic());
       return false;
@@ -794,7 +802,7 @@ public final class HyperliquidSession
       return;
     }
     record.transitionToActive();
-    sink.onInstrumentAdded(record.instrument(), record.bucketer().tick());
+    sink.onInstrumentAdded(record.alias(), record.instrument(), record.bucketer().tick());
     if (record.feedMode() == SourceProfile.FeedMode.SEED_THEN_DELTA) {
       publishDepth(record, record.deltaBook().publishStaged());
     } else {
@@ -829,8 +837,8 @@ public final class HyperliquidSession
     return record.l2BookKey().equals(key) || record.tradesKey().equals(key) ? record : null;
   }
 
-  private void removeRecord(String alias, RemovalCause cause, String message) {
-    SubscriptionRecord record = records.remove(alias);
+  private void removeRecord(String coin, RemovalCause cause, String message) {
+    SubscriptionRecord record = records.remove(coin);
     if (record == null || record.state() == SubscriptionRecord.State.REMOVED) {
       return;
     }
@@ -846,7 +854,7 @@ public final class HyperliquidSession
     cancelAcknowledgement(record.tradesKey());
     record.remove();
     if (wasActive) {
-      sink.onInstrumentRemoved(alias);
+      sink.onInstrumentRemoved(record.alias());
     }
     if (cause != RemovalCause.CLOSE) {
       connector.unsubscribe(record.l2BookKey());
@@ -906,7 +914,10 @@ public final class HyperliquidSession
     }
     if (record.state() == SubscriptionRecord.State.PENDING_BOOK) {
       if (clock.getAsLong() > record.activationDeadlineMillis()) {
-        removeRecord(record.alias(), RemovalCause.TIMEOUT, "subscription activation timed out");
+        removeRecord(
+            record.instrument().symbol(),
+            RemovalCause.TIMEOUT,
+            "subscription activation timed out");
       }
     } else if (record.state() == SubscriptionRecord.State.ACTIVE) {
       acknowledgementTasks.remove(key);
@@ -1027,8 +1038,8 @@ public final class HyperliquidSession
       assetContextFeed = null;
     }
     connector.close();
-    for (String alias : new ArrayList<String>(records.keySet())) {
-      removeRecord(alias, cause == StopCause.FATAL ? RemovalCause.FATAL : RemovalCause.CLOSE, null);
+    for (String coin : new ArrayList<String>(records.keySet())) {
+      removeRecord(coin, cause == StopCause.FATAL ? RemovalCause.FATAL : RemovalCause.CLOSE, null);
     }
     tradeDeduplicator.clear();
     dispatcher.submitControl(

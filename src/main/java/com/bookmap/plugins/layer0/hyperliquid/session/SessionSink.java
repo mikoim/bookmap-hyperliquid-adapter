@@ -11,8 +11,12 @@ public interface SessionSink {
   /** Reports the complete available perpetual-instrument list. */
   void onKnownInstruments(List<PerpetualInstrument> instruments);
 
-  /** Publishes one active instrument at the tick its depth and trade units are expressed in. */
-  void onInstrumentAdded(PerpetualInstrument instrument, BigDecimal tick);
+  /**
+   * Publishes one active instrument at the tick its depth and trade units are expressed in. The
+   * alias is the symbol Bookmap requested, which may differ in case from {@code instrument}'s
+   * Hyperliquid name.
+   */
+  void onInstrumentAdded(String alias, PerpetualInstrument instrument, BigDecimal tick);
 
   /** Reports an active instrument that has been removed. */
   void onInstrumentRemoved(String alias);

@@ -133,7 +133,8 @@ public class ProviderTest {
     RecordingInstrumentListener listener = new RecordingInstrumentListener();
     provider.addListener(listener);
 
-    factory.sink.onInstrumentAdded(instrument, BigDecimal.valueOf(instrument.pips()));
+    factory.sink.onInstrumentAdded(
+        instrument.symbol(), instrument, BigDecimal.valueOf(instrument.pips()));
 
     assertEquals(
         Collections.singletonList(new SubscribeInfo("ETH", "", "PERPETUAL")),
@@ -162,7 +163,8 @@ public class ProviderTest {
     factory.sink.onConnectionLost(ConnectionFailure.UNKNOWN, "unknown");
     factory.sink.onConnectionLost(ConnectionFailure.FATAL, "fatal lost");
     factory.sink.onConnectionRestored();
-    factory.sink.onInstrumentAdded(instrument, BigDecimal.valueOf(instrument.pips()));
+    factory.sink.onInstrumentAdded(
+        instrument.symbol(), instrument, BigDecimal.valueOf(instrument.pips()));
     factory.sink.onInstrumentNotFound("X", "", "PERPETUAL");
     factory.sink.onInstrumentAlreadySubscribed("X", "", "PERPETUAL");
     factory.sink.onDepth("SOL", new DepthUpdate(true, 123, 45));
@@ -224,6 +226,27 @@ public class ProviderTest {
     assertEquals(Arrays.asList(0.001d, 0.002d, 0.005d, 0.01d, 0.1d, 1d), pips.valueOptions);
   }
 
+  /**
+   * Bookmap's Subscribe dialog upper-cases the symbol before it reaches the provider, so an
+   * instrument whose Hyperliquid name is not already upper-case must still resolve.
+   */
+  @Test
+  public void offersTickCandidatesAfterBookmapUppercasesTheSymbol() {
+    FakeSessionFactory factory = new FakeSessionFactory();
+    Provider provider = new Provider(factory);
+    factory.sink.onKnownInstruments(
+        Collections.singletonList(new PerpetualInstrument("kPEPE", 2, new BigDecimal("87.785"))));
+
+    DefaultAndList<Double> pips =
+        provider
+            .getSupportedFeatures()
+            .pipsFunction
+            .apply(new SubscribeInfo("KPEPE", "", "PERPETUAL"));
+
+    assertEquals(Double.valueOf(0.001d), pips.valueDefault);
+    assertEquals(Arrays.asList(0.001d, 0.002d, 0.005d, 0.01d, 0.1d, 1d), pips.valueOptions);
+  }
+
   /** Prevents an unsupported or plain subscription from losing the chosen or default tick. */
   @Test
   public void passesTheChosenTickAndFallsBackForUnsupportedOrPlainSubscriptions() {
@@ -253,7 +276,8 @@ public class ProviderTest {
     RecordingInstrumentListener instruments = new RecordingInstrumentListener();
     provider.addListener(instruments);
 
-    factory.sink.onInstrumentAdded(new PerpetualInstrument("HYPE", 2), new BigDecimal("0.01"));
+    factory.sink.onInstrumentAdded(
+        "HYPE", new PerpetualInstrument("HYPE", 2), new BigDecimal("0.01"));
 
     assertEquals(0.01d, instruments.instrument.pips, 0d);
     assertEquals("87.78", provider.formatPrice("HYPE", 87.78d));

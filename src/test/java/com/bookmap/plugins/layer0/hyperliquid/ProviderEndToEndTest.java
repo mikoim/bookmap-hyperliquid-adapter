@@ -614,6 +614,40 @@ public class ProviderEndToEndTest {
     fixture.assertClosed();
   }
 
+  /**
+   * Bookmap's Subscribe dialog upper-cases the symbol, so a subscription must still reach the
+   * instrument, keep the exchange's own spelling on the wire, and be announced under the alias
+   * Bookmap asked for.
+   */
+  @Test
+  public void subscriptionSurvivesBookmapUppercasingTheSymbol() {
+    Fixture fixture = new Fixture(budget(4, 20, 20, 4));
+    fixture.loginWithMetadata("BTC", "xyz:CL");
+    fixture.frame(TestMetadata.assetContextsFrame("{\"xyz:CL\":{\"markPx\":\"92.283\"}}"));
+    fixture.drain();
+
+    fixture.subscribe("XYZ:CL");
+    fixture.completeSends();
+    fixture.ack("xyz:CL", "l2Book");
+    fixture.ack("xyz:CL", "trades");
+    fixture.book("xyz:CL", 1L, "92.282", "1.5", "92.283", "2.5");
+    fixture.drain();
+
+    assertTrue(
+        fixture.transport.socket().successfulSendBodies().toString(),
+        fixture
+            .transport
+            .socket()
+            .successfulSendBodies()
+            .toString()
+            .contains("\"coin\":\"xyz:CL\""));
+    assertEquals(Collections.singletonList("XYZ:CL"), fixture.instruments.added);
+    assertEquals(0.001d, fixture.instruments.lastInfo.pips, 1e-12d);
+    assertFalse(fixture.data.depths.toString(), fixture.data.depths.isEmpty());
+    fixture.closeTwice();
+    fixture.assertClosed();
+  }
+
   private static HyperliquidProcessBudget budget(
       int connections, int attempts, int frames, int subscriptions) {
     try {

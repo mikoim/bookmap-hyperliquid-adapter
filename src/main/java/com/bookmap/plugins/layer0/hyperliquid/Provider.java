@@ -5,6 +5,7 @@ import com.bookmap.plugins.layer0.hyperliquid.concurrent.ExecutorScheduler;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.StateEventDispatcher;
 import com.bookmap.plugins.layer0.hyperliquid.model.DepthUpdate;
 import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
+import com.bookmap.plugins.layer0.hyperliquid.model.SymbolLookup;
 import com.bookmap.plugins.layer0.hyperliquid.model.TickSizePlan;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMessageParser;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMetaParser;
@@ -201,7 +202,7 @@ public final class Provider extends ExternalLiveBaseProvider {
   }
 
   private PerpetualInstrument instrumentFor(SubscribeInfo subscribeInfo) {
-    return subscribeInfo == null ? null : knownBySymbol.get(subscribeInfo.symbol);
+    return subscribeInfo == null ? null : SymbolLookup.resolve(knownBySymbol, subscribeInfo.symbol);
   }
 
   private void sendOrderFailure() {
@@ -251,13 +252,13 @@ public final class Provider extends ExternalLiveBaseProvider {
     }
 
     @Override
-    public void onInstrumentAdded(PerpetualInstrument instrument, BigDecimal tick) {
+    public void onInstrumentAdded(String alias, PerpetualInstrument instrument, BigDecimal tick) {
       if (instrument == null) {
         return;
       }
       InstrumentInfo info =
           new InstrumentInfo(
-              instrument.symbol(),
+              alias,
               "",
               "PERPETUAL",
               tick.doubleValue(),
@@ -267,10 +268,10 @@ public final class Provider extends ExternalLiveBaseProvider {
               instrument.sizeMultiplier(),
               true);
       Map<String, InstrumentInfo> updated = new HashMap<String, InstrumentInfo>(activeInstruments);
-      updated.put(instrument.symbol(), info);
+      updated.put(alias, info);
       activeInstruments = Collections.unmodifiableMap(updated);
       for (Layer1ApiInstrumentListener listener : instrumentListeners) {
-        listener.onInstrumentAdded(instrument.symbol(), info);
+        listener.onInstrumentAdded(alias, info);
       }
     }
 

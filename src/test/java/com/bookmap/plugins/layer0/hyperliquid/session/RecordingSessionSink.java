@@ -65,10 +65,10 @@ final class RecordingSessionSink implements SessionSink {
   }
 
   @Override
-  public void onInstrumentAdded(PerpetualInstrument instrument, BigDecimal tick) {
-    addedAliases.add(instrument.symbol());
+  public void onInstrumentAdded(String alias, PerpetualInstrument instrument, BigDecimal tick) {
+    addedAliases.add(alias);
     addedTicks.add(tick);
-    events.add("instrument-added:" + instrument.symbol());
+    events.add("instrument-added:" + alias);
   }
 
   @Override
