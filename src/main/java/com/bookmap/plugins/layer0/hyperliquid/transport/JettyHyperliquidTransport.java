@@ -17,12 +17,16 @@ import org.eclipse.jetty.http.HttpMethod;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.websocket.api.RemoteEndpoint;
 import org.eclipse.jetty.websocket.api.Session;
+import org.eclipse.jetty.websocket.api.WebSocketPolicy;
 import org.eclipse.jetty.websocket.api.WriteCallback;
 import org.eclipse.jetty.websocket.client.ClientUpgradeRequest;
 import org.eclipse.jetty.websocket.client.WebSocketClient;
 
 /** Jetty 9.3 implementation of the asynchronous Hyperliquid transport boundary. */
 public final class JettyHyperliquidTransport implements HyperliquidTransport {
+
+  static final int MAX_WEB_SOCKET_MESSAGE_BYTES = 1024 * 1024;
+  static final int MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024;
 
   private final HttpClient httpClient;
   private final WebSocketClient webSocketClient;
@@ -31,12 +35,22 @@ public final class JettyHyperliquidTransport implements HyperliquidTransport {
   public JettyHyperliquidTransport() {
     httpClient = new HttpClient(new SslContextFactory());
     webSocketClient = new WebSocketClient(new SslContextFactory());
+    applyMessageLimits(webSocketClient.getPolicy());
   }
 
   @Override
   public void start() throws Exception {
     httpClient.start();
     webSocketClient.start();
+  }
+
+  /**
+   * Raises Jetty 9.3's 65536-byte default message ceiling. The Testnet {@code fastAssetCtxs}
+   * snapshot is 50 KB and a 400-level Borsa book is 29 KB, both of which grow over time.
+   */
+  static void applyMessageLimits(WebSocketPolicy policy) {
+    policy.setMaxTextMessageSize(MAX_WEB_SOCKET_MESSAGE_BYTES);
+    policy.setMaxBinaryMessageSize(MAX_WEB_SOCKET_MESSAGE_BYTES);
   }
 
   @Override
@@ -50,7 +64,7 @@ public final class JettyHyperliquidTransport implements HyperliquidTransport {
             .content(new StringContentProvider(contentType, body, StandardCharsets.UTF_8))
             .timeout(timeoutMillis, TimeUnit.MILLISECONDS);
     request.send(
-        new BufferingResponseListener() {
+        new BufferingResponseListener(MAX_HTTP_RESPONSE_BYTES) {
           @Override
           public void onComplete(Result result) {
             int status = result.getResponse() == null ? 0 : result.getResponse().getStatus();

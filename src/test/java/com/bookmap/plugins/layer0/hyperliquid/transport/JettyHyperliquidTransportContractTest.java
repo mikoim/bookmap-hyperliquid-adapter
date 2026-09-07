@@ -11,6 +11,7 @@ import java.lang.reflect.Proxy;
 import java.util.concurrent.atomic.AtomicReference;
 import org.eclipse.jetty.websocket.api.RemoteEndpoint;
 import org.eclipse.jetty.websocket.api.Session;
+import org.eclipse.jetty.websocket.api.WebSocketPolicy;
 import org.eclipse.jetty.websocket.api.WriteCallback;
 import org.eclipse.jetty.websocket.common.events.annotated.CallableMethod;
 import org.junit.Test;
@@ -165,6 +166,20 @@ public class JettyHyperliquidTransportContractTest {
                 session(
                     remote, true, new AtomicReference<Integer>(), new AtomicReference<String>()))
             .isOpen());
+  }
+
+  /** Pins the Jetty default we are overriding and the limit the adapter needs instead. */
+  @Test
+  public void messageLimitsExceedTheLargestObservedFrames() {
+    WebSocketPolicy policy = WebSocketPolicy.newClientPolicy();
+    assertEquals(65_536, policy.getMaxTextMessageSize());
+
+    JettyHyperliquidTransport.applyMessageLimits(policy);
+
+    assertEquals(1_048_576, policy.getMaxTextMessageSize());
+    assertEquals(1_048_576, policy.getMaxBinaryMessageSize());
+    assertEquals(1_048_576, JettyHyperliquidTransport.MAX_WEB_SOCKET_MESSAGE_BYTES);
+    assertEquals(4_194_304, JettyHyperliquidTransport.MAX_HTTP_RESPONSE_BYTES);
   }
 
   private static Session session(

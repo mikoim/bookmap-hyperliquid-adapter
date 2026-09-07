@@ -10,6 +10,7 @@ import java.util.Map;
 /** Deterministic transport double for connector boundary tests. */
 public final class FakeHyperliquidTransport implements HyperliquidTransport {
 
+  private int startCount;
   private URI httpUri;
   private String contentType;
   private String httpBody;
@@ -30,7 +31,11 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
 
   @Override
   public void start() {
-    // The fake owns no resources.
+    startCount++;
+  }
+
+  public int startCount() {
+    return startCount;
   }
 
   @Override

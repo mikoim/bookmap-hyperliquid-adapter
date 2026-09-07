@@ -6,7 +6,13 @@ import java.util.Map;
 /** Asynchronous HTTP and WebSocket boundary used by the Hyperliquid connector. */
 public interface HyperliquidTransport extends AutoCloseable {
 
-  /** Starts resources owned by this transport. */
+  /**
+   * Starts the underlying clients. Implementations must be idempotent: one transport is shared by
+   * the market-data connector and the asset-context connector, so this is called once per
+   * connector.
+   *
+   * @throws Exception when the underlying clients cannot start
+   */
   void start() throws Exception;
 
   /** Posts JSON and reports the completed HTTP response. */
