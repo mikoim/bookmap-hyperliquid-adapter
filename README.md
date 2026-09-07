@@ -1,16 +1,17 @@
 # Bookmap Hyperliquid Adapter
 
-Read-only Bookmap Layer 0 market data for Hyperliquid default-DEX perpetuals. The adapter
-loads perpetual metadata over REST, then publishes aggregate L2 books and trades over one
-WebSocket. The `Order book source` dropdown selects Hyperliquid (default), Borsa, or Hyperdash;
-the `Use Hyperliquid testnet` checkbox only applies to Hyperliquid. It never requests
-credentials and never sends orders.
+Read-only Bookmap Layer 0 market data for Hyperliquid perpetuals, including HIP-3
+builder-deployed markets. The adapter loads perpetual metadata over REST, then publishes
+aggregate L2 books and trades over one WebSocket. The `Order book source` dropdown selects
+Hyperliquid (default), Borsa, or Hyperdash; the `Use Hyperliquid testnet` checkbox only applies
+to Hyperliquid. It never requests credentials and never sends orders.
 
 ![Bookmap heatmap for the ETH/USDC perpetual delivered by the adapter](docs/eth.webp)
 
 ## Scope and behavior
 
-The adapter supports the exact read-only perpetual scope exposed by Hyperliquid's default DEX:
+The adapter supports the exact read-only perpetual scope exposed by Hyperliquid across every
+perp dex:
 
 ![The Order book source dropdown in Bookmap's Connectivity configuration dialog](docs/connector.webp)
 
@@ -26,18 +27,23 @@ The adapter supports the exact read-only perpetual scope exposed by Hyperliquid'
   additionally asked for nLevels=400, Hyperliquid ignores nLevels, and Hyperdash rejects it. The
   adapter does not verify either relay against Hyperliquid itself.
 - Only `PERPETUAL` subscriptions are accepted; Spot, history, account data, credentials, orders,
-  and gap filling are not implemented.
+  and gap filling are not implemented. Every live perpetual across every perp dex is listed,
+  including HIP-3 markets, which keep their fully qualified `dex:coin` names (for example
+  `xyz:CL`). Metadata is one `allPerpMetas` request; mark prices arrive continuously on the
+  `fastAssetCtxs` WebSocket feed.
 - Each subscription uses one `l2Book` feed and one `trades` feed on a single WebSocket. Hyperliquid
   and Hyperdash snapshots carry at most 20 levels per side; Borsa serves up to 400 levels per side.
   Coarser tick sizes therefore cover a wider price range with the same number of levels. Trades
   received while disconnected can be missed.
 - The Tick size dropdown lists the ticks Hyperliquid's own order book offers for the instrument's
   price magnitude (for HYPE near 88: 0.001, 0.002, 0.005, 0.01, 0.1, 1), derived from the mark
-  price loaded at login via `metaAndAssetCtxs`. The default is the finest tick the exchange
-  actually quotes at that magnitude. Books are kept on the lossless `10^-(6-szDecimals)` grid and
-  aggregated on publish (bids round down, asks round up, sizes summed), so a stale tick from a saved
-  workspace or a price that crosses a power of ten never corrupts the book; it only changes how many
-  levels the server-side window covers. Re-login to refresh the candidates after a large move.
+  price delivered continuously on the `fastAssetCtxs` WebSocket feed; metadata itself is loaded
+  once via a single `allPerpMetas` request. The default is the finest tick the exchange actually
+  quotes at that magnitude. Books are kept on the lossless `10^-(6-szDecimals)` grid and aggregated
+  on publish (bids round down, asks round up, sizes summed), so a stale tick from a saved workspace
+  or a price that crosses a power of ten never corrupts the book; it only changes how many levels
+  the server-side window covers. Mark prices are refreshed from the live feed, so the candidates
+  follow the market without re-login.
 - The native grid 10^-(6-szDecimals) is the lossless internal price unit; the Bookmap pips of a
   subscription is the tick chosen in the dialog, and trade prices are reported in units of that
   tick (fractions allowed).
@@ -82,6 +88,14 @@ resynchronization are attempted, but no historical gap fill is available and tra
 Borsa deltas are not self-healing: a delta dropped as stale or invalid leaves the published book
 out of sync until the next reconnect, and a market-data queue overflow forces that reconnect so a
 fresh seed replaces the book.
+
+Borsa and Hyperdash reject the `fastAssetCtxs` feed, so those sources open a second WebSocket to
+Hyperliquid Mainnet for mark prices. That connection is read-only, never affects login or the book,
+and consumes one of the ten concurrent connections the in-process budget allows, which caps a single
+JVM at five relay-backed providers.
+
+On Testnet the instrument list holds roughly 630 symbols across about 200 perp dexes, most of them
+throwaway markets deployed by other developers.
 
 ## Quality checks
 

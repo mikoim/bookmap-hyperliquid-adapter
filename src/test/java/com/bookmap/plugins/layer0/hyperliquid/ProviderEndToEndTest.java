@@ -587,6 +587,30 @@ public class ProviderEndToEndTest {
     assertEquals(0.0001d, fixture.instruments.lastInfo.pips, 0d);
   }
 
+  /** A HIP-3 instrument subscribes, prices, and trades under its fully qualified name. */
+  @Test
+  public void hip3InstrumentFlowsEndToEnd() {
+    Fixture fixture = new Fixture(budget(4, 20, 20, 4));
+    fixture.loginWithMetadata("BTC", "xyz:CL");
+    fixture.frame(TestMetadata.assetContextsFrame("{\"xyz:CL\":{\"markPx\":\"92.283\"}}"));
+    fixture.drain();
+
+    fixture.subscribe("xyz:CL");
+    fixture.completeSends();
+    fixture.ack("xyz:CL", "l2Book");
+    fixture.ack("xyz:CL", "trades");
+    fixture.book("xyz:CL", 1L, "92.282", "1.5", "92.283", "2.5");
+    fixture.trade("xyz:CL", "B", "92.283", "1.0", 2L, 9L);
+    fixture.drain();
+
+    assertEquals(Collections.singletonList("xyz:CL"), fixture.instruments.added);
+    assertEquals(0.001d, fixture.instruments.lastInfo.pips, 1e-12d);
+    assertFalse(fixture.data.depths.toString(), fixture.data.depths.isEmpty());
+    assertFalse(fixture.data.trades.toString(), fixture.data.trades.isEmpty());
+    fixture.closeTwice();
+    fixture.assertClosed();
+  }
+
   private static HyperliquidProcessBudget budget(
       int connections, int attempts, int frames, int subscriptions) {
     try {
