@@ -111,7 +111,12 @@ public final class HyperliquidMetaParser {
     return primitive.getAsString();
   }
 
-  /** Reads a positive decimal markPx string; anything else yields no reference price. */
+  /**
+   * Reads a positive decimal markPx string; anything else yields no reference price. Values whose
+   * magnitude is absurd (precision or scale beyond 20 digits, e.g. {@code "1E+999999996"}) are also
+   * rejected, since they would later overflow {@link BigDecimal} arithmetic in tick-size
+   * computations.
+   */
   private static BigDecimal referencePrice(JsonElement context) {
     if (context == null || !context.isJsonObject()) {
       return null;
@@ -122,7 +127,13 @@ public final class HyperliquidMetaParser {
     }
     try {
       BigDecimal price = new BigDecimal(markPx.getAsString());
-      return price.signum() > 0 ? price : null;
+      if (price.signum() <= 0) {
+        return null;
+      }
+      if (price.precision() > 20 || Math.abs(price.scale()) > 20) {
+        return null;
+      }
+      return price;
     } catch (NumberFormatException invalid) {
       return null;
     }

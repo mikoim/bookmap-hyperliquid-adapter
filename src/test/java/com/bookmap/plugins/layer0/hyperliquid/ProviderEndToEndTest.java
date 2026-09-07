@@ -542,6 +542,38 @@ public class ProviderEndToEndTest {
     assertEquals(0.01d, fixture.instruments.lastInfo.pips, 0d);
   }
 
+  @Test
+  public void legacyWorkspaceTickSubscribesOnTheNativeGridWithoutAggregation() {
+    Fixture fixture = new Fixture(budget(4, 20, 20, 4));
+    fixture.loginWithPricedMetadata("HYPE", "87.785");
+    fixture.provider.subscribe(new SubscribeInfoCrypto("HYPE", "", "PERPETUAL", 0.0001d, 100d));
+    fixture.drain();
+    fixture.completeSends();
+    String bodies = fixture.transport.socket().successfulSendBodies().toString();
+    assertFalse(bodies.contains("nSigFigs"));
+    assertFalse(bodies.contains("mantissa"));
+    assertFalse(bodies.contains("nLevels"));
+    fixture.ack("HYPE", "l2Book");
+    fixture.ack("HYPE", "trades");
+    fixture.frame(
+        "{\"channel\":\"l2Book\",\"data\":{\"coin\":\"HYPE\",\"time\":1,\"levels\":[["
+            + "{\"px\":\"87.784\",\"sz\":\"2.36\"},{\"px\":\"87.783\",\"sz\":\"1.32\"}],["
+            + "{\"px\":\"87.785\",\"sz\":\"161.16\"}]]}}");
+    fixture.trade("HYPE", "B", "87.784", "1", 2L, 7L);
+    fixture.drain();
+
+    assertEquals(
+        Arrays.asList(
+            "login",
+            "added:HYPE",
+            "depth:HYPE:877830:132",
+            "depth:HYPE:877840:236",
+            "depth:HYPE:877850:16116",
+            "trade:HYPE:877840"),
+        fixture.trace);
+    assertEquals(0.0001d, fixture.instruments.lastInfo.pips, 0d);
+  }
+
   private static HyperliquidProcessBudget budget(
       int connections, int attempts, int frames, int subscriptions) {
     try {

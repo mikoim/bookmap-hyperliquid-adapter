@@ -54,6 +54,20 @@ public class HyperliquidMetaParserTest {
   }
 
   @Test
+  public void referencePriceIsNullForAbsurdMagnitudes() throws Exception {
+    String json =
+        TestMetadata.wrap(
+            TestMetadata.universe("HUGE", "TINY", "OK"), "1E+999999996", "1E-999999996", "87.785");
+
+    List<PerpetualInstrument> result = new HyperliquidMetaParser().parse(json);
+
+    assertEquals(3, result.size());
+    assertNull(result.get(0).referencePrice());
+    assertNull(result.get(1).referencePrice());
+    assertEquals(new BigDecimal("87.785"), result.get(2).referencePrice());
+  }
+
+  @Test
   public void rejectsNonArrayRootWrongLengthAndContextMismatch() {
     assertRejected("{\"universe\":[{\"name\":\"BTC\",\"szDecimals\":1}]}");
     assertRejected("[{\"universe\":[{\"name\":\"BTC\",\"szDecimals\":1}]}]");
