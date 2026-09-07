@@ -154,8 +154,8 @@ public final class HyperliquidMessageParser {
       throw new ProtocolException("subscription response must contain a subscription object");
     }
     JsonObject subscriptionObject = subscription.getAsJsonObject();
-    if (!subscriptionObject.has("coin")) {
-      // Connection-scoped feeds such as fastAssetCtxs acknowledge without a coin.
+    if (isFastAssetCtxsSubscription(subscriptionObject) && !subscriptionObject.has("coin")) {
+      // fastAssetCtxs is a connection-scoped feed and acknowledges without a coin.
       return ParsedFrame.ignored(Collections.<String>emptyList());
     }
     SubscriptionKey key = parseSubscription(subscriptionObject);
@@ -170,6 +170,14 @@ public final class HyperliquidMessageParser {
         Collections.<MarketDataEvent>emptyList(),
         Collections.singletonList(event),
         Collections.<String>emptyList());
+  }
+
+  private boolean isFastAssetCtxsSubscription(JsonObject subscription) {
+    JsonElement type = subscription.get("type");
+    return type != null
+        && type.isJsonPrimitive()
+        && type.getAsJsonPrimitive().isString()
+        && "fastAssetCtxs".equals(type.getAsString());
   }
 
   private ParsedFrame parseError(JsonObject object) {

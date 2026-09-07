@@ -175,6 +175,9 @@ public class HyperliquidMessageParserTest {
             + "\"subscription\":{\"type\":\"unknown\",\"coin\":\"BTC\"}}}");
     assertInvalid(
         "{\"channel\":\"subscriptionResponse\",\"data\":{\"method\":\"subscribe\","
+            + "\"subscription\":{\"type\":\"l2Book\"}}}");
+    assertInvalid(
+        "{\"channel\":\"subscriptionResponse\",\"data\":{\"method\":\"subscribe\","
             + "\"subscription\":{\"type\":\"l2Book\",\"coin\":\"BTC\",\"dex\":\"x\"}}}");
   }
 
@@ -348,6 +351,27 @@ public class HyperliquidMessageParserTest {
 
     assertEquals(ParsedFrame.Disposition.IGNORED, frame.disposition());
     assertTrue(frame.controlEvents().isEmpty());
+  }
+
+  /**
+   * Confines the coin-less ack allowance to fastAssetCtxs: an instrument-scoped subscription
+   * missing its coin must still be reported as invalid, not silently swallowed.
+   */
+  @Test
+  public void onlyExemptsFastAssetCtxsFromTheCoinRequirement() {
+    ParsedFrame instrumentScoped =
+        parser.parse(
+            "{\"channel\":\"subscriptionResponse\",\"data\":{\"method\":\"subscribe\","
+                + "\"subscription\":{\"type\":\"trades\"}}}");
+    ParsedFrame connectionScoped =
+        parser.parse(
+            "{\"channel\":\"subscriptionResponse\",\"data\":{\"method\":\"subscribe\","
+                + "\"subscription\":{\"type\":\"fastAssetCtxs\"}}}");
+
+    assertEquals(ParsedFrame.Disposition.INVALID, instrumentScoped.disposition());
+    assertFalse(instrumentScoped.diagnostics().isEmpty());
+    assertEquals(ParsedFrame.Disposition.IGNORED, connectionScoped.disposition());
+    assertTrue(connectionScoped.diagnostics().isEmpty());
   }
 
   /** Reports a rejected feed subscription as a diagnostic, never as a per-instrument error. */
