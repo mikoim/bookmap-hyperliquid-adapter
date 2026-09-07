@@ -35,7 +35,7 @@ public class HyperliquidConnectorTest {
 
     assertEquals(URI.create("https://api.hyperliquid.xyz/info"), fixture.transport.httpUri());
     assertEquals("application/json", fixture.transport.contentType());
-    assertEquals("{\"type\":\"meta\"}", fixture.transport.httpBody());
+    assertEquals("{\"type\":\"metaAndAssetCtxs\"}", fixture.transport.httpBody());
     assertEquals(10_000L, fixture.transport.httpTimeoutMillis());
     assertTrue(fixture.transport.connectCalls().isEmpty());
   }
@@ -441,7 +441,7 @@ public class HyperliquidConnectorTest {
   }
 
   private static String validMeta(String coin) {
-    return "{\"universe\":[{\"name\":\"" + coin + "\",\"szDecimals\":2}]}";
+    return TestMetadata.wrap(TestMetadata.universe(coin));
   }
 
   private static HyperliquidProcessBudget newBudget(

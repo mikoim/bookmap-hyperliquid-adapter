@@ -9,6 +9,7 @@ import com.bookmap.plugins.layer0.hyperliquid.HyperliquidConnector;
 import com.bookmap.plugins.layer0.hyperliquid.HyperliquidEnvironment;
 import com.bookmap.plugins.layer0.hyperliquid.MarketDataSource;
 import com.bookmap.plugins.layer0.hyperliquid.SourceProfile;
+import com.bookmap.plugins.layer0.hyperliquid.TestMetadata;
 import com.bookmap.plugins.layer0.hyperliquid.book.OrderBookSnapshotDiff;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget.SubscriptionPermit;
@@ -805,7 +806,7 @@ public class HyperliquidSessionSubscriptionTest {
         metadata.append("\",\"szDecimals\":2}");
       }
       metadata.append("]}");
-      transport.completeMeta(200, metadata.toString());
+      transport.completeMeta(200, TestMetadata.wrap(metadata.toString()));
       drain();
       transport.openSocket();
       drain();

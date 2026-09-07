@@ -815,14 +815,7 @@ public class ProviderEndToEndTest {
   }
 
   private static String metadata(String... symbols) {
-    StringBuilder result = new StringBuilder("{\"universe\":[");
-    for (int i = 0; i < symbols.length; i++) {
-      if (i != 0) {
-        result.append(',');
-      }
-      result.append("{\"name\":\"").append(symbols[i]).append("\",\"szDecimals\":2}");
-    }
-    return result.append("]}").toString();
+    return TestMetadata.wrap(TestMetadata.universe(symbols));
   }
 
   private static final class Clock implements LongSupplier {

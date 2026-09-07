@@ -8,6 +8,7 @@ import com.bookmap.plugins.layer0.hyperliquid.HyperliquidConnector;
 import com.bookmap.plugins.layer0.hyperliquid.HyperliquidEnvironment;
 import com.bookmap.plugins.layer0.hyperliquid.MarketDataSource;
 import com.bookmap.plugins.layer0.hyperliquid.SourceProfile;
+import com.bookmap.plugins.layer0.hyperliquid.TestMetadata;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.CancellableScheduler;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.StateEventDispatcher;
@@ -278,7 +279,7 @@ public class HyperliquidSessionDeltaBookTest {
     void login() {
       session.login(SourceProfile.of(MarketDataSource.BORSA, HyperliquidEnvironment.MAINNET));
       drain();
-      transport.completeMeta(200, "{\"universe\":[{\"name\":\"BTC\",\"szDecimals\":2}]}");
+      transport.completeMeta(200, TestMetadata.wrap(TestMetadata.universe("BTC")));
       drain();
       transport.openSocket();
       drain();
