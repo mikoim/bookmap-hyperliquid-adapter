@@ -151,8 +151,12 @@ exchange に分ける案は採らない。Mainnet だけでも `STX` `SNDK` `AVG
   銘柄一覧側で無視される
 
 スナップショットと差分の区別は、購読直後の最初の `fastAssetCtxs` フレームをスナップショットとして
-扱うことで行う。判定は `fastAssetCtxs` を運んでいる接続の世代に紐づけてリセットする。リレー選択時、
-その世代は本接続ではなく `AssetContextFeed` の専用接続のものである。
+扱うことで行う。判定は `fastAssetCtxs` を運んでいる接続の世代に紐づけてリセットする。
+
+判定と `applySnapshot` / `applyDelta` の選択は、その接続を持つ側が行う。Hyperliquid 選択時は
+`HyperliquidSession.onSocketOpened` が、リレー選択時は `AssetContextFeed.onSocketOpened` が
+フラグをリセットし、どちらも `onAssetContexts(map, snapshot)` の `snapshot` 引数で結果を伝える。
+`AssetContextStore` 自身は世代を持たない。
 
 #### `session.AssetContextFeed`(リレー選択時のみ)
 
@@ -163,10 +167,33 @@ Hyperliquid Mainnet の WebSocket に `fastAssetCtxs` 専用の接続を 1 本�
 - 転送層(`HyperliquidTransport`)は本接続のものを**共有する**。Jetty の `HttpClient` /
   `WebSocketClient` は複数接続を扱えるため、専用の転送層を作ると Bookmap の JVM に不要なスレッド
   プールが増えるだけになる。共有に伴う所有権の扱いは下記「既存コンポーネントの変更」で定める
-- 接続世代が開くたびに `fastAssetCtxs` を購読し、受信した写像を `AssetContextStore` に流す
 - **この接続の失敗はログイン成否とマーケットデータに一切影響させない**。接続できない、あるいは
   切断された場合は既存の再接続バックオフに任せ、診断を 1 回出す。復旧までは参照価格が固定される
-- プロセス共有予算(同時接続 10、接続試行 30/分、購読 1000)を通常どおり消費する
+- プロセス共有予算の同時接続枠(10)と接続試行枠(30/分)を 1 本分消費する。`fastAssetCtxs` は
+  `SubscriptionKey` を持たないため、購読枠(1000)は消費しない
+
+`AssetContextFeed` は ctx コネクタの `HyperliquidConnector.Listener` を**自分で実装する**。
+`HyperliquidSession` は ctx コネクタのリスナーにはならない。両コネクタの `generation` は独立した
+連番であり、`HyperliquidSession` の制御イベント経路(`handleControls`)は
+`generation == currentGeneration` で本接続の世代を照合するため、ctx コネクタの世代をそこへ流すと
+一致・不一致が偶然に決まる。リスナーの契約は次のとおり。
+
+| コールバック | `AssetContextFeed` の動作 |
+|---|---|
+| `onMetadata` | 到達しない(`startWithoutMetadata` のため)。呼ばれたら診断のみ |
+| `onInitialFailure` | 診断を 1 回出す。`sink.onLoginFailed` は呼ばない |
+| `onSocketOpened` | スナップショット判定をリセットし、`fastAssetCtxs` 購読フレームを 1 通送る |
+| `onFrame` | `HyperliquidMessageParser` で解析する。`PONG` は **`connector.acceptPong(generation)` へ返す**。`ASSET_CONTEXTS` は **ctx コネクタ自身の**世代が現行世代であることを確かめてセッションへ引き渡す。`SUBSCRIPTION_ACK` と診断は捨てる。`SUBSCRIPTION_ERROR` は診断のみ(本接続の `handleSubscriptionError` には流さない) |
+| `onFrameSent` | 何もしない |
+| `onDisconnected` | 診断を 1 回出す。`sink.onConnectionLost` は呼ばない |
+
+`PONG` の返送は必須である。ctx コネクタも既存のハートビートを送るため、`acceptPong` を呼ばないと
+`schedulePongDeadline` が毎回発火し、この接続は無限に切断と再接続を繰り返す。
+
+`ASSET_CONTEXTS` の引き渡しは `AssetContextFeed` が本接続の状態レーン
+(`StateEventDispatcher.submitControl`、両コネクタで共有)へ投入し、セッションの専用入口
+`HyperliquidSession.onAssetContexts(Map<String, BigDecimal>, boolean snapshot)` を呼ぶ形で行う。
+本接続の世代照合は適用しない(ctx 接続と本接続の生存期間は独立しているため)。
 
 ### 既存コンポーネントの変更(最小差分)
 
@@ -188,8 +215,15 @@ Hyperliquid Mainnet の WebSocket に `fastAssetCtxs` 専用の接続を 1 本�
 - `startWithoutMetadata(SourceProfile)` を追加する。メタデータ REST を発行せず、ただちに接続を試みる。
   `Listener.onMetadata` は呼ばれない。`AssetContextFeed` が使う
 - 接続世代が開いたときに、`fastAssetCtxs` 購読フレームを 1 通送る経路を設ける。この 1 通は
-  接続時のフレーム予約数に含める
-- `SubscriptionKey` を持たないため `desired` には登録せず、ack タイムアウト監視も行わない
+  再接続時のフレーム予約数(現行 `desired.size() + 1`)に含める。`socketOpened` の予約検算
+  (`reservedFramesRemaining() > desired.size() + 1`)も同じ数に揃える
+- `SubscriptionKey` を持たないため `desired` には登録せず、ack タイムアウト監視も行わない。
+  `desired` は `TreeMap` で自然順序のため null キーの照会は NPE になる。`sendWhenPossible` と
+  `isStillDesired` の `desired` 参照は `SUBSCRIBE_FEED`(`subscription == null`)を先に除外する
+- `startWithoutMetadata` も `transport.start()` を呼ぶ。共有した転送層は 2 回開始されるため、
+  `HyperliquidTransport.start()` は**冪等であること**を契約とし、Javadoc に明記する
+  (Jetty の `AbstractLifeCycle.start()` は開始済みなら何もしないので現行実装は満たしている。
+  `FakeHyperliquidTransport` も同じ契約に合わせる)
 - 転送層の所有権を明示する。現行の `close()` は無条件に `transport.close()` を呼ぶため、
   1 つの転送層を 2 つのコネクタで共有できない。コンストラクタで所有の有無を受け取り、
   所有しないコネクタは `close()` で転送層を閉じない。`AssetContextFeed` のコネクタを非所有として
@@ -213,8 +247,19 @@ Hyperliquid Mainnet の WebSocket に `fastAssetCtxs` 専用の接続を 1 本�
 
 - `onMetadata` で受け取った銘柄をそのまま `onKnownInstruments` に流す(現行と同じタイミング。
   この時点では参照価格なし)
-- `ASSET_CONTEXTS` 制御イベントを状態レーンで `AssetContextStore` に適用する。適用後、既知銘柄の
-  `PerpetualInstrument` を `markPrice` 付きで作り直し、`onKnownInstruments` を再発行する
+- 資産コンテキストの入口は 1 つにする。Hyperliquid 選択時は本接続の `handleControls` が
+  `ASSET_CONTEXTS` 制御イベント(本接続の世代照合を通過したもの)から、リレー選択時は
+  `AssetContextFeed` が直接、いずれも `onAssetContexts(Map<String, BigDecimal>, boolean snapshot)`
+  を状態レーンで呼ぶ
+- `onAssetContexts` は写像を `AssetContextStore` に適用したうえで、**セッションの `instruments`
+  マップを `markPrice` 付きの `PerpetualInstrument` で置き換える**。`sink.onKnownInstruments` に
+  渡すだけでは不十分である。`handleSubscribe` は `instruments.get(symbol)` の `referencePrice()`
+  を `TickSizePlan.defaultTick` と `TickSizePlan.parametersFor` の双方に渡しており、ここが null の
+  ままだとサーバ側グルーピングが常に省略され、既存の Tick size 設計が無言で退行する
+- 作り直しは `symbol` / `szDecimals` を変えず `referencePrice` だけを差し替える。`pips()` と
+  `priceDecimals()` は不変なので、購読済み `SubscriptionRecord` が保持する
+  `PerpetualInstrument` と `PriceBucketer` は据え置いてよい(再購読も再計算も行わない)
+- 置き換え後に `onKnownInstruments` を再発行する
 - 再発行の条件は次の 2 つだけとする。
   1. スナップショット受信時(接続世代ごとに 1 回)は必ず再発行する
   2. 差分受信時は、既知銘柄のいずれかの `markPx` が変化しており、かつ前回の再発行から 5 秒以上
@@ -314,6 +359,11 @@ Hyperliquid Mainnet の WebSocket に `fastAssetCtxs` 専用の接続を 1 本�
 
 - 接続世代ごとに `fastAssetCtxs` の購読フレームが 1 通送られる
 - スナップショット適用で `onKnownInstruments` が再発行され、`PerpetualInstrument` に参照価格が入る
+- スナップショット適用**後**の `subscribe` が、その参照価格に基づく `nSigFigs`/`mantissa` 付きの
+  `l2Book` 購読 JSON を送る(セッションの `instruments` マップが更新されていることの検証)
+- ctx 接続の `pong` フレームがその接続の `acceptPong` に返り、ハートビート周期を越えても
+  切断されない(擬似時計と `FakeHyperliquidTransport` で検証する)
+- ctx 接続の世代と本接続の世代が食い違っていても、資産コンテキストが適用される
 - 既知銘柄に無関係な差分では再発行されない
 - 既知銘柄の価格が変化しても、前回の再発行から 5 秒未満なら再発行されない。5 秒経過後の最初の
   変化で再発行される(擬似時計で検証する)
