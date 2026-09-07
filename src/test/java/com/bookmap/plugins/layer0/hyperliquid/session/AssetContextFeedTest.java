@@ -167,6 +167,43 @@ public class AssetContextFeedTest {
   }
 
   /**
+   * The retry chain survives an outage longer than a single attempt. Two consecutive failures
+   * before the socket ever opens must still leave a further attempt scheduled, and the whole outage
+   * is one incident: the diagnostic count must not grow with the retries.
+   */
+  @Test
+  public void feedKeepsRetryingAfterRepeatedPreOpenFailures() {
+    Fixture fixture = new Fixture(MarketDataSource.BORSA, false);
+
+    fixture.transport.failConnection(1, new IOException("feed unavailable"));
+    fixture.drain();
+    fixture.advance(1_000L);
+    assertEquals(3, fixture.transport.connectCalls().size());
+
+    fixture.transport.failConnection(2, new IOException("still unavailable"));
+    fixture.drain();
+    fixture.advance(2_000L);
+    assertEquals(4, fixture.transport.connectCalls().size());
+
+    fixture.transport.openConnection(3);
+    fixture.drain();
+    fixture.transport.socket().succeedNextSend();
+    fixture.drain();
+    fixture.transport.emitTextFromConnection(
+        3, TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"87.785\"}}"));
+    fixture.drain();
+
+    assertEquals("87.785", fixture.sink.lastReferencePrice("HYPE"));
+    assertEquals(
+        fixture.sink.events().toString(),
+        1,
+        countEvents(fixture.sink.events(), "diagnostic:asset-context feed"));
+    assertFalse(fixture.sink.events().toString(), hasEvent(fixture.sink.events(), "login-failed"));
+    assertFalse(
+        fixture.sink.events().toString(), hasEvent(fixture.sink.events(), "connection-lost"));
+  }
+
+  /**
    * A retried feed connection keeps its heartbeat indefinitely. The retry stays an <em>initial</em>
    * attempt, so every send acquires its own frame; a reconnect attempt would instead draw on the
    * connection permit's fixed reservation, which one subscribe and one ping exhaust, and the second

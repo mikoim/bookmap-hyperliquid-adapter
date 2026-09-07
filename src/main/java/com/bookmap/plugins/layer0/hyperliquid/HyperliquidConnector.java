@@ -190,6 +190,12 @@ public final class HyperliquidConnector implements AutoCloseable {
    * so that each send acquires its own frame, the way the feed's first attempt does; a reconnect
    * attempt instead draws on the connection permit's fixed reservation, which one subscribe and one
    * ping exhaust.
+   *
+   * <p>Rearming {@link #reportInitialFailure} is what keeps the chain alive for an outage longer
+   * than one attempt. That latch fires once per connector so the market-data path reports a login
+   * failure exactly once; a caller that asks to retry is by definition not treating the failure as
+   * terminal, so the next pre-open failure must be able to reach the listener and schedule the
+   * attempt after it.
    */
   public void retryAfterInitialFailure() {
     stateSubmitter.accept(
@@ -199,6 +205,7 @@ public final class HyperliquidConnector implements AutoCloseable {
             if (closed || !started || generationActive || connectionRetry != null) {
               return;
             }
+            initialFailureReported = false;
             scheduleConnectionAttempt(true, clock.getAsLong() + nextReconnectDelayMillis());
           }
         });
