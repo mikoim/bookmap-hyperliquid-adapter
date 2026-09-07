@@ -177,6 +177,90 @@ public class OrderBookSnapshotDiffTest {
         diff.apply(book, false));
   }
 
+  /** Matches the aggregation Hyperliquid itself produced for nSigFigs=4 at the same instant. */
+  @Test
+  public void coarseTickSumsLevelsWithBidsFlooredAndAsksCeiled() {
+    PerpetualInstrument hype = new PerpetualInstrument("HYPE", 2);
+    OrderBookSnapshotDiff coarse =
+        new OrderBookSnapshotDiff(hype, new PriceBucketer(hype, new BigDecimal("0.01")));
+
+    List<DepthUpdate> updates =
+        coarse.apply(
+            coarse
+                .validate(
+                    snapshot(
+                        1,
+                        bids(
+                            level("87.784", "2.36"),
+                            level("87.783", "1.32"),
+                            level("87.779", "4.96"),
+                            level("87.777", "20.63")),
+                        asks(
+                            level("87.785", "161.16"),
+                            level("87.786", "24.1"),
+                            level("87.789", "17.08"))),
+                    0)
+                .snapshot(),
+            false);
+
+    assertEquals(
+        Arrays.asList(depth(true, 8777, 2559), depth(true, 8778, 368), depth(false, 8779, 20234)),
+        updates);
+  }
+
+  @Test
+  public void coarseTickEmitsOnlyChangedBucketsAndDeletesEmptiedOnes() {
+    PerpetualInstrument hype = new PerpetualInstrument("HYPE", 2);
+    OrderBookSnapshotDiff coarse =
+        new OrderBookSnapshotDiff(hype, new PriceBucketer(hype, new BigDecimal("0.01")));
+    coarse.apply(
+        coarse
+            .validate(
+                snapshot(
+                    1,
+                    bids(level("87.784", "1"), level("87.783", "1")),
+                    asks(level("87.785", "1"))),
+                0)
+            .snapshot(),
+        false);
+
+    List<DepthUpdate> updates =
+        coarse.apply(
+            coarse
+                .validate(
+                    snapshot(
+                        2,
+                        bids(level("87.782", "1"), level("87.781", "1")),
+                        asks(level("87.791", "1"))),
+                    1)
+                .snapshot(),
+            false);
+
+    assertEquals(Arrays.asList(depth(false, 8779, 0), depth(false, 8780, 100)), updates);
+    assertEquals(Arrays.asList(depth(true, 8778, 0), depth(false, 8780, 0)), coarse.clear());
+  }
+
+  @Test
+  public void bucketSumsSaturateAtIntegerMax() {
+    PerpetualInstrument hype = new PerpetualInstrument("HYPE", 2);
+    OrderBookSnapshotDiff coarse =
+        new OrderBookSnapshotDiff(hype, new PriceBucketer(hype, new BigDecimal("0.01")));
+
+    List<DepthUpdate> updates =
+        coarse.apply(
+            coarse
+                .validate(
+                    snapshot(
+                        1,
+                        bids(level("87.784", "21474836.47"), level("87.783", "21474836.47")),
+                        asks()),
+                    0)
+                .snapshot(),
+            false);
+
+    assertEquals(Arrays.asList(depth(true, 8778, Integer.MAX_VALUE)), updates);
+  }
+
   private void assertInvalidSize(String size) {
     SnapshotValidation validation =
         diff.validate(snapshot(11, bids(level("100", size)), asks()), 10);

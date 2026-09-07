@@ -14,16 +14,26 @@ import java.util.Objects;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
-/** Validates complete order-book snapshots and emits deterministic incremental depth changes. */
+/**
+ * Validates complete order-book snapshots on the native grid and emits deterministic incremental
+ * depth changes at the subscription's tick.
+ */
 public final class OrderBookSnapshotDiff {
 
   private final PerpetualInstrument instrument;
+  private final PriceBucketer bucketer;
   private SortedMap<Integer, BigDecimal> bids = new TreeMap<Integer, BigDecimal>();
   private SortedMap<Integer, BigDecimal> asks = new TreeMap<Integer, BigDecimal>();
 
-  /** Creates a snapshot differ that uses the supplied instrument's exact conversions. */
+  /** Creates a differ that publishes on the native grid (identity bucketing). */
   public OrderBookSnapshotDiff(PerpetualInstrument instrument) {
+    this(instrument, PriceBucketer.identity(instrument));
+  }
+
+  /** Creates a differ that publishes bucket totals at the bucketer's tick. */
+  public OrderBookSnapshotDiff(PerpetualInstrument instrument, PriceBucketer bucketer) {
     this.instrument = Objects.requireNonNull(instrument, "instrument");
+    this.bucketer = Objects.requireNonNull(bucketer, "bucketer");
   }
 
   /**
@@ -68,13 +78,27 @@ public final class OrderBookSnapshotDiff {
    */
   public List<DepthUpdate> apply(NormalizedBookSnapshot snapshot, boolean forceFullResync) {
     Objects.requireNonNull(snapshot, "snapshot");
+    SortedMap<Integer, BigDecimal> newBids = bucketize(snapshot.bids(), true);
+    SortedMap<Integer, BigDecimal> newAsks = bucketize(snapshot.asks(), false);
     List<DepthUpdate> updates = new ArrayList<DepthUpdate>();
-    appendUpdates(updates, true, bids, snapshot.bids(), forceFullResync);
-    appendUpdates(updates, false, asks, snapshot.asks(), forceFullResync);
+    appendUpdates(updates, true, bids, newBids, forceFullResync);
+    appendUpdates(updates, false, asks, newAsks, forceFullResync);
 
-    bids = new TreeMap<Integer, BigDecimal>(snapshot.bids());
-    asks = new TreeMap<Integer, BigDecimal>(snapshot.asks());
+    bids = newBids;
+    asks = newAsks;
     return Collections.unmodifiableList(updates);
+  }
+
+  /** Sums native levels into buckets of the selected tick; bids floor, asks ceil. */
+  private SortedMap<Integer, BigDecimal> bucketize(
+      SortedMap<Integer, BigDecimal> nativeLevels, boolean bid) {
+    SortedMap<Integer, BigDecimal> buckets = new TreeMap<Integer, BigDecimal>();
+    for (Map.Entry<Integer, BigDecimal> level : nativeLevels.entrySet()) {
+      Integer bucket = Integer.valueOf(bucketer.bucket(bid, level.getKey().intValue()));
+      BigDecimal total = buckets.get(bucket);
+      buckets.put(bucket, total == null ? level.getValue() : total.add(level.getValue()));
+    }
+    return buckets;
   }
 
   /** Deletes every saved level and empties the baseline. */
