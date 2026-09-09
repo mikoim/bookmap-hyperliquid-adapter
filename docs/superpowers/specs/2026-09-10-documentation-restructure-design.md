@@ -10,8 +10,8 @@
 混在しており、どの読者にとっても過不足のある資料になっている。
 これを読者別に 3 つの資料へ再編する。
 
-対象は Markdown 文書のみ。コード、ビルド設定、テスト、`.codex/` や `.grok/` の設定、
-`references/` 以下の外部資産は変更しない。
+対象は Markdown 文書のみ。コード、ビルド設定、テスト、`.codex/` や `.grok/` の設定は
+変更しない。
 
 ## 成果物
 
@@ -76,10 +76,7 @@ README から削除する記述（実装の詳細であり、コードと既存 
 構成:
 
 1. Prerequisites — JDK 21 から 25。20 以下と 26 以上はビルドが拒否する。
-   `references/` は `.gitignore` されており新規クローンには存在しない。
-   `references/jdk-25.0.4.1` はメンテナの作業コピーにのみ存在し、システム JDK 起因の
-   問題を切り分けるときだけの `JAVA_HOME` フォールバックであることを明記する。
-   常用の JDK 選択機構ではなく、新規参入者のビルド手順の前提でもない
+   システム JDK を使う。代替 JDK の指定方法は書かない
 2. Build — `./gradlew clean build`。成果物は
    `build/libs/hyperliquid-adapter-1.2.0.jar`。API・Gson・Jetty は Bookmap 側が供給する。
    Java 8 バイトコードを出力し `verifyJava8Bytecode` が major version 52 を検証する
@@ -131,6 +128,8 @@ Claude Code は `@` インポートを解決し、Codex と Grok は `AGENTS.md`
   `@` インポートが存在するパスを指すこと
 - `docs/eth.webp` と `docs/connector.webp` の参照が `README.md` から維持されていること
 - 削除対象として列挙した記述が `README.md` に残っていないこと
+- 4 文書のいずれにも `references/` への言及がないこと（ローカル開発用の資料と SDK であり
+  公開文書の対象外）
 - `AGENTS.md` のワークフロー規約 4 節が `09b7216` 時点の `CLAUDE.md` と文言レベルで
   一致すること（末尾に追加する `Where things are` 節は比較対象外）
 - `./gradlew --no-daemon check` が従来どおり成功すること（回帰がないことの確認）
