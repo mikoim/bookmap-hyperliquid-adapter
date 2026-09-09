@@ -30,6 +30,89 @@ import org.junit.Test;
 public class HyperliquidSessionLifecycleTest {
 
   @Test
+  public void staleBookWarnsOnceAndOnlyValidCurrentBookClearsIt() {
+    Fixture fixture = fixtureWithActiveBtc();
+    fixture.scheduler.advanceBy(29_999L);
+    fixture.drain();
+    assertTrue(fixture.sink.dataStatuses().isEmpty());
+    fixture.scheduler.advanceBy(1L);
+    fixture.drain();
+    assertEquals(1, statusCount(fixture, "BOOK_STALE"));
+    String warning = fixture.sink.dataStatuses().get(0);
+    assertTrue(warning.contains("source=HYPERLIQUID"));
+    assertTrue(warning.contains("symbol=BTC"));
+    assertTrue(warning.contains("generation=1"));
+    assertTrue(warning.contains("elapsedMillis=30000"));
+    fixture.scheduler.advanceBy(1_000L);
+    fixture.book(0L); // Rejected exchange timestamp must not refresh freshness.
+    fixture.drain();
+    assertEquals(1, statusCount(fixture, "BOOK_STALE"));
+    assertEquals(0, statusCount(fixture, "BOOK_RESUMED"));
+    fixture.book(2L); // Even an unchanged book is a valid fresh reception.
+    fixture.drain();
+    assertEquals(1, statusCount(fixture, "BOOK_RESUMED"));
+    fixture.book(3L);
+    fixture.drain();
+    assertEquals(1, statusCount(fixture, "BOOK_RESUMED"));
+  }
+
+  @Test
+  public void bookRecoveryNotificationWaitsForPublishedBookAfterAcknowledgements() {
+    Fixture fixture = fixtureWithActiveBtc();
+    fixture.beginRecovery();
+    assertEquals(1, statusCount(fixture, "BOOK_RESYNCING"));
+    assertEquals(1, statusCount(fixture, "TRADE_GAP_POSSIBLE"));
+    fixture.completeSends(2);
+    fixture.ack(SubscriptionType.L2_BOOK);
+    fixture.ack(SubscriptionType.TRADES);
+    fixture.drain();
+    assertEquals(0, statusCount(fixture, "BOOK_RESUMED"));
+    fixture.book(2L);
+    fixture.drain();
+    assertEquals(1, statusCount(fixture, "BOOK_RESUMED"));
+    assertTrue(
+        fixture.sink.dataStatuses().toString().contains("historical trades are not backfilled"));
+  }
+
+  @Test
+  public void unsubscribeAndCloseSuppressFreshnessTimers() {
+    Fixture fixture = fixtureWithActiveBtc();
+    fixture.session.unsubscribe("BTC");
+    fixture.drain();
+    fixture.scheduler.advanceBy(30_000L);
+    fixture.drain();
+    assertTrue(fixture.sink.dataStatuses().isEmpty());
+    fixture.session.close();
+    fixture.drain();
+    fixture.scheduler.advanceBy(120_000L);
+    fixture.drain();
+    assertTrue(fixture.sink.dataStatuses().isEmpty());
+  }
+
+  @Test
+  public void pendingTradeOverflowReportsPossibleGapOnce() {
+    Fixture fixture = new Fixture();
+    fixture.login();
+    fixture.subscribe("BTC");
+    fixture.completeSends(2);
+    for (int index = 0; index < 1_026; index++) {
+      fixture.trade(1L, index);
+    }
+    fixture.drain();
+    assertEquals(1, statusCount(fixture, "TRADE_GAP_POSSIBLE"));
+  }
+
+  private static int statusCount(Fixture fixture, String state) {
+    int count = 0;
+    for (String message : fixture.sink.dataStatuses()) {
+      if (message.contains("state=" + state)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  @Test
   public void reconnectedSessionSurvivesRepeatedHeartbeats() {
     Fixture fixture = fixtureWithActiveBtc();
     fixture.beginRecovery();

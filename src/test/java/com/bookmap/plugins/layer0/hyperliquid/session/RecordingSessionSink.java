@@ -17,6 +17,17 @@ final class RecordingSessionSink implements SessionSink {
   private final List<String> removedAliases = new ArrayList<String>();
   private final List<Trade> trades = new ArrayList<Trade>();
   private final List<String> systemMessages = new ArrayList<String>();
+  private final List<String> dataStatuses = new ArrayList<String>();
+
+  List<String> dataStatuses() {
+    return dataStatuses;
+  }
+
+  @Override
+  public void onDataStatus(String message, boolean warning) {
+    dataStatuses.add((warning ? "WARN:" : "INFO:") + message);
+  }
+
   private int knownInstrumentPublications;
   private final Map<String, String> lastReferencePrices = new HashMap<String, String>();
 

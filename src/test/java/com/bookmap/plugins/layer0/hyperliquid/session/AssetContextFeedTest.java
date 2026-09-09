@@ -28,6 +28,53 @@ import org.junit.Test;
 /** Covers the second connection a relay source needs for the fastAssetCtxs feed. */
 public class AssetContextFeedTest {
 
+  @Test
+  public void delayedOldGenerationRejectionCannotMarkRecoveredFeedUnavailable() {
+    Fixture fixture = new Fixture(MarketDataSource.BORSA);
+    ArrayDeque<Runnable> delayed = new ArrayDeque<Runnable>();
+    AssetContextFeed feed =
+        new AssetContextFeed(
+            fixture.feedConnector,
+            new HyperliquidMessageParser(),
+            fixture.session,
+            delayed::addLast,
+            fixture.sink::onDiagnostic);
+    feed.onSocketOpened(1L);
+    feed.onFrame(1L, "{\"channel\":\"error\",\"data\":{\"message\":\"bad\"}}");
+    Runnable oldRejection = delayed.removeFirst();
+    feed.onDisconnected(1L, null);
+    feed.onSocketOpened(2L);
+    feed.onFrame(2L, TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"87.785\"}}"));
+    while (!delayed.isEmpty()) {
+      delayed.removeFirst().run();
+    }
+    assertEquals(2, fixture.sink.dataStatuses().size());
+    assertTrue(fixture.sink.dataStatuses().get(1).contains("state=MARK_PRICE_RESUMED"));
+    oldRejection.run();
+    assertEquals(2, fixture.sink.dataStatuses().size());
+  }
+
+  @Test
+  public void feedOutageNotifiesOnceAndRecoversOnlyAfterValidData() {
+    Fixture fixture = new Fixture(MarketDataSource.BORSA);
+    fixture.transport.remoteCloseConnection(1, 1006, "lost");
+    fixture.drain();
+    assertEquals(1, fixture.sink.dataStatuses().size());
+    assertTrue(fixture.sink.dataStatuses().get(0).contains("state=MARK_PRICE_UNAVAILABLE"));
+    fixture.advance(1_000L);
+    fixture.open(2);
+    assertEquals(1, fixture.sink.dataStatuses().size());
+    fixture.transport.emitTextFromConnection(
+        2, TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"bad\"}}"));
+    fixture.drain();
+    assertEquals(1, fixture.sink.dataStatuses().size());
+    fixture.transport.emitTextFromConnection(
+        2, TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"87.785\"}}"));
+    fixture.drain();
+    assertEquals(2, fixture.sink.dataStatuses().size());
+    assertTrue(fixture.sink.dataStatuses().get(1).contains("state=MARK_PRICE_RESUMED"));
+  }
+
   /** A relay opens a second Hyperliquid Mainnet connection and subscribes to the feed on it. */
   @Test
   public void relayOpensADedicatedMainnetFeedConnection() {
@@ -293,6 +340,8 @@ public class AssetContextFeedTest {
         fixture.sink.events().toString(),
         1,
         countEvents(fixture.sink.events(), "diagnostic:asset-context feed subscription rejected"));
+    assertEquals(1, fixture.sink.dataStatuses().size());
+    assertTrue(fixture.sink.dataStatuses().get(0).contains("state=MARK_PRICE_UNAVAILABLE"));
     assertFalse(
         fixture.sink.events().toString(), hasEvent(fixture.sink.events(), "connection-lost"));
   }

@@ -60,6 +60,7 @@ public final class HyperliquidSession
   private final LongSupplier clock;
   private final StateEventDispatcher dispatcher;
   private final SessionSink sink;
+  private final DataHealthMonitor dataHealth;
   private final Runnable afterClose;
   private final BoundedTradeDeduplicator tradeDeduplicator =
       new BoundedTradeDeduplicator(TRADE_DEDUPLICATION_CAPACITY, TRADE_DEDUPLICATION_TTL_MILLIS);
@@ -122,6 +123,7 @@ public final class HyperliquidSession
     this.clock = clock;
     this.dispatcher = dispatcher;
     this.sink = sink;
+    this.dataHealth = new DataHealthMonitor(scheduler, clock, dispatcher::submitControl, sink);
     this.assetContextConnectorFactory = assetContextConnectorFactory;
     this.afterClose = afterClose;
     connector.setListener(this);
@@ -193,6 +195,10 @@ public final class HyperliquidSession
           public void run() {
             if (!closed && connectionState != ConnectionState.STOPPED) {
               sink.onSystemMessage("market-data frame queue overflow", MessageKind.UNCLASSIFIED);
+              for (SubscriptionRecord record : records.values()) {
+                dataHealth.resync(
+                    record.alias(), currentGeneration, "market-data frame queue overflow");
+              }
               dispatcher.discardMarketFrames();
               for (SubscriptionRecord record : records.values()) {
                 if (record.state() == SubscriptionRecord.State.ACTIVE) {
@@ -367,6 +373,13 @@ public final class HyperliquidSession
   @Override
   public void onDisconnected(long generation, TransportFailure failure) {
     if (!closed && generation == currentGeneration) {
+      for (SubscriptionRecord record : records.values()) {
+        dataHealth.resync(
+            record.alias(), generation, failure == null ? "connection lost" : failure.message());
+      }
+      if (profile.source() == MarketDataSource.HYPERLIQUID) {
+        dataHealth.markUnavailable(generation, "market-data connection lost");
+      }
       currentGeneration = -1L;
       cancelAcknowledgementTasks();
       dispatcher.discardMarketFrames();
@@ -396,6 +409,7 @@ public final class HyperliquidSession
     if (!closed && newProfile != null) {
       if (profile == null) {
         profile = newProfile;
+        dataHealth.start(newProfile);
       }
       connectionState = ConnectionState.STARTING;
       connector.start(newProfile);
@@ -508,6 +522,9 @@ public final class HyperliquidSession
       } else if (event.kind() == ControlEvent.Kind.ASSET_CONTEXTS) {
         if (onAssetContexts(event.markPrices(), assetContextSnapshotPending)) {
           assetContextSnapshotPending = false;
+          if (!event.markPrices().isEmpty()) {
+            dataHealth.markResumed(generation);
+          }
         }
       }
     }
@@ -540,6 +557,15 @@ public final class HyperliquidSession
     }
     sink.onKnownInstruments(new ArrayList<PerpetualInstrument>(instruments.values()));
     return true;
+  }
+
+  /** Reports a mark-price incident on the serialized state lane. */
+  void onMarkPriceUnavailable(long generation, String reason) {
+    dataHealth.markUnavailable(generation, reason);
+  }
+
+  void onMarkPriceResumed(long generation) {
+    dataHealth.markResumed(generation);
   }
 
   /** Rebuilds only when a listed instrument moved and the throttle window has elapsed. */
@@ -648,6 +674,7 @@ public final class HyperliquidSession
     }
     publishDepth(record, record.diff().apply(validation.snapshot(), record.takeForceFullResync()));
     record.acceptActiveBook(validation.snapshot().time());
+    dataHealth.bookPublished(record.alias(), currentGeneration);
   }
 
   /**
@@ -667,6 +694,7 @@ public final class HyperliquidSession
         activateIfReady(record);
       } else if (!recoveringNow) {
         publishDepth(record, book.replacePublished());
+        dataHealth.bookPublished(record.alias(), currentGeneration);
       }
       return;
     }
@@ -682,6 +710,7 @@ public final class HyperliquidSession
     record.acceptActiveBook(snapshot.time());
     if (live) {
       publishDepth(record, delta.updates());
+      dataHealth.bookPublished(record.alias(), currentGeneration);
     }
   }
 
@@ -718,6 +747,7 @@ public final class HyperliquidSession
       }
       if (!record.addPendingTrade(converted) && !record.pendingTradeOverflowWarned()) {
         record.markPendingTradeOverflowWarned();
+        dataHealth.tradeGap(record.alias(), currentGeneration, "trade buffer overflow");
         sink.onDiagnostic("pending trade buffer full for " + record.alias());
       }
       return;
@@ -729,6 +759,7 @@ public final class HyperliquidSession
       }
       if (!record.addPendingTrade(converted) && !record.pendingTradeOverflowWarned()) {
         record.markPendingTradeOverflowWarned();
+        dataHealth.tradeGap(record.alias(), currentGeneration, "trade buffer overflow");
         sink.onDiagnostic("recovery trade buffer full for " + record.alias());
       }
       return;
@@ -765,6 +796,7 @@ public final class HyperliquidSession
     } else {
       publishDepth(record, record.diff().apply(record.takePendingBook(), false));
     }
+    dataHealth.bookPublished(record.alias(), currentGeneration);
     ArrayDeque<PendingTrade> pending = record.takePendingTrades();
     while (!pending.isEmpty()) {
       publishIfNew(record, pending.removeFirst());
@@ -780,6 +812,7 @@ public final class HyperliquidSession
   private void publishIfNew(SubscriptionRecord record, PendingTrade trade) {
     if (tradeDeduplicator.markIfNew(trade.key(), clock.getAsLong())) {
       sink.onTrade(record.alias(), trade.priceUnits(), trade.sizeUnits(), trade.buyAggressor());
+      dataHealth.tradePublished(record.alias(), currentGeneration);
     }
   }
 
@@ -799,6 +832,7 @@ public final class HyperliquidSession
     if (record == null || record.state() == SubscriptionRecord.State.REMOVED) {
       return;
     }
+    dataHealth.remove(record.alias());
     boolean wasActive = record.state() == SubscriptionRecord.State.ACTIVE;
     if (wasActive
         && (cause == RemovalCause.UNSUPPORTED_PRICE
@@ -936,6 +970,7 @@ public final class HyperliquidSession
         if (record.feedMode() == SourceProfile.FeedMode.SEED_THEN_DELTA) {
           if (record.deltaBook().seeded()) {
             publishDepth(record, record.deltaBook().replacePublished());
+            dataHealth.bookPublished(record.alias(), generation);
           }
         } else {
           com.bookmap.plugins.layer0.hyperliquid.book.OrderBookSnapshotDiff.NormalizedBookSnapshot
@@ -944,6 +979,7 @@ public final class HyperliquidSession
             publishDepth(record, record.diff().apply(book, true));
             record.acceptActiveBook(book.time());
             record.takeForceFullResync();
+            dataHealth.bookPublished(record.alias(), generation);
           }
         }
         ArrayDeque<PendingTrade> pending = record.takePendingTrades();
@@ -975,6 +1011,7 @@ public final class HyperliquidSession
     }
     connectionState = ConnectionState.STOPPED;
     closed = true;
+    dataHealth.close();
     currentGeneration++;
     generationInvalidated = true;
     recovering = false;

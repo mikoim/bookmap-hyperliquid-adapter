@@ -17,8 +17,8 @@ import java.util.function.Consumer;
 
 /**
  * Owns the extra Hyperliquid Mainnet connection a relay source needs, because Borsa and Hyperdash
- * both reject the fastAssetCtxs subscription. Its failures never reach the session sink: mark
- * prices only refine tick-size candidates, so a broken feed leaves the last known values in place.
+ * both reject the fastAssetCtxs subscription. Failures produce data-health notifications without
+ * failing the market-data connection; tick-size candidates retain the last known mark prices.
  *
  * <p>The feed is its own connector listener rather than a branch of the session's control path,
  * because the two connectors number their generations independently: a pong routed through the
@@ -84,7 +84,6 @@ final class AssetContextFeed implements HyperliquidConnector.Listener, AutoClose
   public void onSocketOpened(long generation) {
     currentGeneration = generation;
     snapshotPending = true;
-    failureReported = false;
   }
 
   @Override
@@ -106,9 +105,9 @@ final class AssetContextFeed implements HyperliquidConnector.Listener, AutoClose
       } else if (event.kind() == ControlEvent.Kind.ASSET_CONTEXTS) {
         submit(generation, event.markPrices());
       } else if (event.kind() == ControlEvent.Kind.SUBSCRIPTION_ERROR) {
-        // A rejection here only freezes mark prices, so it stays a diagnostic and never reaches
+        // A rejection freezes mark prices and reports a health warning; it never reaches
         // the market-data path's handleSubscriptionError, which treats an unknown target as fatal.
-        reportOnceOnStateLane("asset-context feed subscription rejected");
+        reportOnceOnStateLane(generation, "asset-context feed subscription rejected");
       }
     }
   }
@@ -120,7 +119,10 @@ final class AssetContextFeed implements HyperliquidConnector.Listener, AutoClose
 
   @Override
   public void onDisconnected(long generation, TransportFailure failure) {
-    reportOnce("asset-context feed disconnected", failure);
+    if (!closed && generation == currentGeneration) {
+      reportOnce("asset-context feed disconnected", failure);
+      currentGeneration = -1L;
+    }
   }
 
   private void submit(final long generation, final Map<String, BigDecimal> markPrices) {
@@ -128,25 +130,31 @@ final class AssetContextFeed implements HyperliquidConnector.Listener, AutoClose
         new Runnable() {
           @Override
           public void run() {
-            if (generation != currentGeneration) {
+            if (closed || generation != currentGeneration) {
               return;
             }
             // Only a frame the session really consumed clears the pending snapshot, so a rejected
             // one leaves the next frame free to seed the store in full.
             if (session.onAssetContexts(markPrices, snapshotPending)) {
               snapshotPending = false;
+              if (!markPrices.isEmpty()) {
+                session.onMarkPriceResumed(generation);
+                failureReported = false;
+              }
             }
           }
         });
   }
 
   /** Hands one incident report to the state lane, since onFrame runs on the callback thread. */
-  private void reportOnceOnStateLane(final String message) {
+  private void reportOnceOnStateLane(final long generation, final String message) {
     stateLane.accept(
         new Runnable() {
           @Override
           public void run() {
-            reportOnce(message, null);
+            if (!closed && generation == currentGeneration) {
+              reportOnce(message, null);
+            }
           }
         });
   }
@@ -156,6 +164,8 @@ final class AssetContextFeed implements HyperliquidConnector.Listener, AutoClose
       return;
     }
     failureReported = true;
+    session.onMarkPriceUnavailable(
+        currentGeneration, message + (failure == null ? "" : ": " + failure.message()));
     diagnostics.accept(message + (failure == null ? "" : ": " + failure.message()));
   }
 }

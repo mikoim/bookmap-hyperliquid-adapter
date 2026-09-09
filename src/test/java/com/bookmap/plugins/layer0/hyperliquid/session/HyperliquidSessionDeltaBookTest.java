@@ -93,6 +93,8 @@ public class HyperliquidSessionDeltaBookTest {
 
     fixture.session.onMarketOverflow();
     fixture.drain();
+    assertTrue(fixture.sink.dataStatuses().toString().contains("state=BOOK_RESYNCING"));
+    assertTrue(fixture.sink.dataStatuses().toString().contains("state=TRADE_GAP_POSSIBLE"));
     fixture.clock.now += 1_000L;
     fixture.scheduler.advanceBy(1_000L);
     fixture.drain();
@@ -108,6 +110,7 @@ public class HyperliquidSessionDeltaBookTest {
     fixture.receive(book("BTC", 2L, bids(level("101.000", "2")), asks()));
     fixture.drain();
 
+    assertTrue(fixture.sink.dataStatuses().toString().contains("state=BOOK_RESUMED"));
     assertEquals(connectCallsBefore + 1, fixture.transport.connectCalls().size());
     assertTrue(fixture.sink.events().contains("depth:BTC:1000000:0"));
     assertTrue(fixture.sink.events().contains("depth:BTC:1010000:200"));
