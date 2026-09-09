@@ -44,9 +44,14 @@
    （Hyperliquid 20 / Borsa 400 / Hyperdash 20）、testnet 可否、mark price の取得元
 6. Scope — 対応は全 perp dex の `PERPETUAL` 購読のみ。Spot、履歴、口座データ、
    認証情報、発注、ギャップ補填は非対応
-7. Data-health messages — 6 状態の表。何が起きたかと、利用者が取るべき対応
+7. Data-health messages — 7 メッセージ（`BOOK_STALE`、`BOOK_RESYNCING` / `BOOK_RESUMED`、
+   `TRADE_GAP_POSSIBLE` / `TRADE_RESUMED`、`MARK_PRICE_UNAVAILABLE` / `MARK_PRICE_RESUMED`）の表。
+   何が起きたかと、利用者が取るべき対応。表の前に、全メッセージが `data-status` で始まり
+   選択中のソース・環境・銘柄・UTC 時刻を含むことを 1 文で述べる。個々のフィールド書式
+   （`*`、generation 番号、`feedSource`）は書かない
 8. Limits — 同一 JVM 内の全プロバイダで共有される接続予算、リレー使用時の
-   5 プロバイダ上限、切断中の約定は補填されないこと
+   5 プロバイダ上限、切断中の約定は補填されないこと、Testnet の銘柄一覧が
+   約 200 の perp dex にまたがる約 630 銘柄でその大半が他の開発者の試験用市場であること
 9. For developers — `docs/development.md` へのリンク
 
 README から削除する記述（実装の詳細であり、コードと既存 spec が正典）:
@@ -71,14 +76,16 @@ README から削除する記述（実装の詳細であり、コードと既存 
 構成:
 
 1. Prerequisites — JDK 21 から 25。20 以下と 26 以上はビルドが拒否する。
-   `references/jdk-25.0.4.1` はシステム JDK 起因の問題を切り分けるときだけの
-   `JAVA_HOME` フォールバックであり、常用の JDK 選択機構ではない
+   `references/` は `.gitignore` されており新規クローンには存在しない。
+   `references/jdk-25.0.4.1` はメンテナの作業コピーにのみ存在し、システム JDK 起因の
+   問題を切り分けるときだけの `JAVA_HOME` フォールバックであることを明記する。
+   常用の JDK 選択機構ではなく、新規参入者のビルド手順の前提でもない
 2. Build — `./gradlew clean build`。成果物は
    `build/libs/hyperliquid-adapter-1.2.0.jar`。API・Gson・Jetty は Bookmap 側が供給する。
    Java 8 バイトコードを出力し `verifyJava8Bytecode` が major version 52 を検証する
 3. Quality gates — 既存の 6 コマンドと SpotBugs レポートの出力先
 4. Code layout — パッケージ単位の 1 行表
-5. Specs and plans — `docs/superpowers/specs/` と `plans/` が設計の履歴であること、
+5. Specs and plans — `docs/superpowers/specs/` と `docs/superpowers/plans/` が設計の履歴であること、
    変更時のワークフローは `AGENTS.md` を参照すること
 
 Code layout の表に載せるパッケージと責務:
@@ -104,7 +111,7 @@ Human approval、Scope）を文言を変えずに移設し、末尾に参照先�
 ## Where things are
 - User-visible behavior and limits -> README.md
 - Build, quality gates, code layout -> docs/development.md
-- Design history -> docs/superpowers/specs/ and plans/
+- Design history -> docs/superpowers/specs/ and docs/superpowers/plans/
 - Class-level detail -> Javadoc in src/main/java
 ```
 
@@ -120,10 +127,12 @@ Claude Code は `@` インポートを解決し、Codex と Grok は `AGENTS.md`
 
 ドキュメントのみの変更のため自動テストは追加しない。以下を確認する。
 
-- 3 文書のすべての内部リンクが存在するパスを指すこと
+- `README.md`、`docs/development.md`、`AGENTS.md`、`CLAUDE.md` のすべての内部リンクと
+  `@` インポートが存在するパスを指すこと
 - `docs/eth.webp` と `docs/connector.webp` の参照が `README.md` から維持されていること
 - 削除対象として列挙した記述が `README.md` に残っていないこと
-- `AGENTS.md` のワークフロー規約が `09b7216` 時点の `CLAUDE.md` と文言レベルで一致すること
+- `AGENTS.md` のワークフロー規約 4 節が `09b7216` 時点の `CLAUDE.md` と文言レベルで
+  一致すること（末尾に追加する `Where things are` 節は比較対象外）
 - `./gradlew --no-daemon check` が従来どおり成功すること（回帰がないことの確認）
 
 ## 非目標
