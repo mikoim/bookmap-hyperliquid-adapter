@@ -1,8 +1,9 @@
 # Bookmap Hyperliquid Adapter
 
 Read-only Bookmap Layer 0 market data for Hyperliquid perpetuals, including HIP-3
-builder-deployed markets. The adapter publishes aggregate L2 order books and trades for every live
-perpetual on every perp dex. It never requests credentials and never sends orders.
+builder-deployed markets. Every live perpetual on every perp dex is listed and available to
+subscribe to; the adapter publishes aggregate L2 order books and trades for the instruments you
+subscribe to. It never requests credentials and never sends orders.
 
 ![Bookmap heatmap for the ETH/USDC perpetual delivered by the adapter](docs/eth.webp)
 
@@ -27,7 +28,7 @@ To build the JAR yourself, see [docs/development.md](docs/development.md).
 
 ## Connect
 
-Open Bookmap's Connectivity configuration dialog and select the adapter.
+Open Bookmap's Connectivity configuration dialog and select "Hyperliquid" (shown as "HYP" in the connection list).
 
 ![The Order book source dropdown in Bookmap's Connectivity configuration dialog](docs/connector.webp)
 

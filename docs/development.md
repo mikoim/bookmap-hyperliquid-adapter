@@ -2,11 +2,9 @@
 
 ## Prerequisites
 
-- JDK 21 through JDK 25. The build rejects JDK 20 and earlier and JDK 26 and later; those
-  environments need a Gradle and quality-tool upgrade first.
+- JDK 21 through JDK 25, used as the system JDK. The build rejects JDK 20 and earlier and JDK 26
+  and later; those environments need a Gradle and quality-tool upgrade first.
 - A shell that can run the Gradle wrapper.
-
-Use the system JDK.
 
 ## Build
 
