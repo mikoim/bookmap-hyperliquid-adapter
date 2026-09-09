@@ -8,6 +8,7 @@ import com.bookmap.plugins.layer0.hyperliquid.MarketDataSource;
 import com.bookmap.plugins.layer0.hyperliquid.SourceProfile;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.ManualScheduler;
 import java.util.ArrayDeque;
+import java.util.Collections;
 import org.junit.Test;
 
 /** Exercises health transitions and timer ownership independently of transport heartbeats. */
@@ -35,7 +36,7 @@ public class DataHealthMonitorTest {
     fixture.monitor.bookPublished("BTC", 1L);
     fixture.now = 30_000L;
     fixture.scheduler.advanceBy(30_000L); // Timer has queued work on the state lane.
-    fixture.monitor.resync("BTC", 1L, "connection lost");
+    fixture.monitor.resync(Collections.singletonList("BTC"), 1L, "connection lost");
     fixture.monitor.bookPublished("BTC", 2L);
     fixture.drain(); // Old generation's queued callback must not take ownership of the new timer.
     fixture.monitor.close();
@@ -51,8 +52,8 @@ public class DataHealthMonitorTest {
     fixture.monitor.bookPublished("BTC", 1L);
     fixture.monitor.tradePublished("BTC", 1L);
     fixture.advance(1_000L);
-    fixture.monitor.resync("BTC", 1L, "connection lost");
-    fixture.monitor.resync("BTC", 2L, "retry failed");
+    fixture.monitor.resync(Collections.singletonList("BTC"), 1L, "connection lost");
+    fixture.monitor.resync(Collections.singletonList("BTC"), 2L, "retry failed");
     assertEquals(2, fixture.sink.dataStatuses().size());
     fixture.advance(1_000L);
     fixture.monitor.bookPublished("BTC", 3L);

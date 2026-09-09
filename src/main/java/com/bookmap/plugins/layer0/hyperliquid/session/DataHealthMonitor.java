@@ -3,7 +3,10 @@ package com.bookmap.plugins.layer0.hyperliquid.session;
 import com.bookmap.plugins.layer0.hyperliquid.SourceProfile;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.CancellableScheduler;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
@@ -64,27 +67,49 @@ final class DataHealthMonitor implements AutoCloseable {
     }
   }
 
-  void resync(String symbol, long generation, String reason) {
+  /**
+   * Reports one incident that invalidates the books of several symbols at once. A reconnect touches
+   * every subscription, so each state is reported as a single message naming the affected symbols
+   * rather than two messages per symbol. Per-symbol timings stay in the recovery messages.
+   */
+  void resync(Collection<String> resyncSymbols, long generation, String reason) {
     if (closed) {
       return;
     }
-    Health health = health(symbol);
-    if (health.resyncSince == null) {
-      health.resyncSince = clock.getAsLong();
-      cancelTimer(health);
+    long now = clock.getAsLong();
+    List<String> resyncing = new ArrayList<String>();
+    List<String> gapped = new ArrayList<String>();
+    for (String symbol : resyncSymbols) {
+      Health health = health(symbol);
+      if (health.resyncSince == null) {
+        health.resyncSince = now;
+        cancelTimer(health);
+        resyncing.add(symbol);
+      }
+      if (beginGap(health, now)) {
+        gapped.add(symbol);
+      }
+    }
+    if (!resyncing.isEmpty()) {
       emit(
-          symbol,
+          String.join(",", resyncing),
           generation,
           "BOOK_RESYNCING",
           true,
-          "lastBookReceivedAt="
-              + timestamp(health.lastBook)
-              + " elapsedMillis="
-              + elapsed(clock.getAsLong(), health.lastBook)
-              + " reason="
-              + reason);
+          "detectedAt=" + timestamp(now) + " reason=" + reason);
     }
-    tradeGap(symbol, generation, reason);
+    if (!gapped.isEmpty()) {
+      emit(
+          String.join(",", gapped),
+          generation,
+          "TRADE_GAP_POSSIBLE",
+          true,
+          "detectedAt="
+              + timestamp(now)
+              + " reason="
+              + reason
+              + "; historical trades are not backfilled");
+    }
   }
 
   void tradeGap(String symbol, long generation, String reason) {
@@ -92,9 +117,8 @@ final class DataHealthMonitor implements AutoCloseable {
       return;
     }
     Health health = health(symbol);
-    if (health.gapSince == null) {
-      health.gapSince =
-          health.lastTrade == null ? Long.valueOf(clock.getAsLong()) : health.lastTrade;
+    long now = clock.getAsLong();
+    if (beginGap(health, now)) {
       emit(
           symbol,
           generation,
@@ -103,11 +127,20 @@ final class DataHealthMonitor implements AutoCloseable {
           "possibleGapFrom="
               + timestamp(health.gapSince)
               + " detectedAt="
-              + timestamp(clock.getAsLong())
+              + timestamp(now)
               + " reason="
               + reason
               + "; historical trades are not backfilled");
     }
+  }
+
+  /** Opens a possible-gap interval, conservatively starting at the last published trade. */
+  private boolean beginGap(Health health, long now) {
+    if (health.gapSince != null) {
+      return false;
+    }
+    health.gapSince = health.lastTrade == null ? Long.valueOf(now) : health.lastTrade;
+    return true;
   }
 
   void tradePublished(String symbol, long generation) {

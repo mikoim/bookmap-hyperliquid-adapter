@@ -108,14 +108,17 @@ throwaway markets deployed by other developers.
 Data-health transitions appear as Bookmap system messages and in the application log: WARN for
 anomalies and INFO for recovery (subject to Bookmap's configured log level). Every message starts
 with `data-status` and includes the selected source, environment, symbol (`*` for the mark-price
-feed), connection generation, UTC time, and state-specific diagnostic details.
+feed, or a comma-separated list when one incident affects several symbols at once), connection
+generation, UTC time, and state-specific diagnostic details.
 
 - `BOOK_STALE`: no valid book has been accepted for an active symbol for 30 seconds. An unchanged
   but valid book refreshes this timer; invalid or older books do not. This indicates reception
   inactivity, not proof of a feed failure, and does not force a reconnect.
 - `BOOK_RESYNCING` / `BOOK_RESUMED`: a disconnect or market queue overflow requires a new book.
-  Resumption is reported only after a replacement book is published, even if the connection's
-  subscription acknowledgements have already arrived. `BOOK_RESUMED` also clears a stale warning.
+  One such incident invalidates every subscription at once and is reported as a single message
+  naming the affected symbols; the per-symbol timings appear in `BOOK_RESUMED`, which is reported
+  only after a replacement book is published, even if the connection's subscription
+  acknowledgements have already arrived. `BOOK_RESUMED` also clears a stale warning.
 - `TRADE_GAP_POSSIBLE` / `TRADE_RESUMED`: disconnects and market/trade buffer overflows may lose
   trades. A subsequent published trade ends the possible-gap interval, but historical trades
   are not backfilled. These intervals use local processing times, conservatively starting at

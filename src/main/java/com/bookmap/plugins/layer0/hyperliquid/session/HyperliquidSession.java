@@ -195,10 +195,8 @@ public final class HyperliquidSession
           public void run() {
             if (!closed && connectionState != ConnectionState.STOPPED) {
               sink.onSystemMessage("market-data frame queue overflow", MessageKind.UNCLASSIFIED);
-              for (SubscriptionRecord record : records.values()) {
-                dataHealth.resync(
-                    record.alias(), currentGeneration, "market-data frame queue overflow");
-              }
+              dataHealth.resync(
+                  trackedAliases(), currentGeneration, "market-data frame queue overflow");
               dispatcher.discardMarketFrames();
               for (SubscriptionRecord record : records.values()) {
                 if (record.state() == SubscriptionRecord.State.ACTIVE) {
@@ -373,10 +371,8 @@ public final class HyperliquidSession
   @Override
   public void onDisconnected(long generation, TransportFailure failure) {
     if (!closed && generation == currentGeneration) {
-      for (SubscriptionRecord record : records.values()) {
-        dataHealth.resync(
-            record.alias(), generation, failure == null ? "connection lost" : failure.message());
-      }
+      dataHealth.resync(
+          trackedAliases(), generation, failure == null ? "connection lost" : failure.message());
       if (profile.source() == MarketDataSource.HYPERLIQUID) {
         dataHealth.markUnavailable(generation, "market-data connection lost");
       }
@@ -403,6 +399,15 @@ public final class HyperliquidSession
         restoreNotifiedForIncident = false;
       }
     }
+  }
+
+  /** Aliases of every tracked subscription, so one incident reports one message per state. */
+  private List<String> trackedAliases() {
+    List<String> aliases = new ArrayList<String>(records.size());
+    for (SubscriptionRecord record : records.values()) {
+      aliases.add(record.alias());
+    }
+    return aliases;
   }
 
   private void handleLogin(SourceProfile newProfile) {

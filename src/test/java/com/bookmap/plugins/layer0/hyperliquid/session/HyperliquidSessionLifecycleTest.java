@@ -75,6 +75,28 @@ public class HyperliquidSessionLifecycleTest {
   }
 
   @Test
+  public void oneDisconnectReportsEachHealthStateOnceForAllSymbols() {
+    Fixture fixture = new Fixture();
+    fixture.loginWithSymbols(3);
+    fixture.subscribe("BTC");
+    fixture.subscribe("C1");
+    fixture.subscribe("C2");
+    fixture.completeSends(6);
+    fixture.book("BTC", "100.000", 1L);
+    fixture.book("C1", "100.000", 1L);
+    fixture.book("C2", "100.000", 1L);
+    fixture.drain();
+
+    fixture.beginRecovery();
+
+    assertEquals(1, statusCount(fixture, "BOOK_RESYNCING"));
+    assertEquals(1, statusCount(fixture, "TRADE_GAP_POSSIBLE"));
+    assertTrue(
+        fixture.sink.dataStatuses().toString(),
+        fixture.sink.dataStatuses().get(0).contains("symbol=BTC,C1,C2"));
+  }
+
+  @Test
   public void unsubscribeAndCloseSuppressFreshnessTimers() {
     Fixture fixture = fixtureWithActiveBtc();
     fixture.session.unsubscribe("BTC");
