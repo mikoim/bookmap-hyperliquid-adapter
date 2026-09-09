@@ -36,6 +36,11 @@ public interface SessionSink {
   /** Reports a user-visible system message. */
   void onSystemMessage(String message, MessageKind kind);
 
+  /** Reports a data-health transition to the user and, in production, the application log. */
+  default void onDataStatus(String message, boolean warning) {
+    onSystemMessage(message, MessageKind.UNCLASSIFIED);
+  }
+
   /** Reports a non-fatal diagnostic. */
   void onDiagnostic(String message);
 

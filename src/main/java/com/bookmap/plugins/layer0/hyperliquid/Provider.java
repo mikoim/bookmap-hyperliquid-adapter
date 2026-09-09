@@ -339,6 +339,16 @@ public final class Provider extends ExternalLiveBaseProvider {
     }
 
     @Override
+    public void onDataStatus(String message, boolean warning) {
+      if (warning) {
+        Log.warn(message);
+      } else {
+        Log.info(message);
+      }
+      onSystemMessage(message, MessageKind.UNCLASSIFIED);
+    }
+
+    @Override
     public void onDiagnostic(String message) {
       Log.warn(message);
     }

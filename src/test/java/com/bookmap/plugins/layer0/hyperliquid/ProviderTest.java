@@ -269,6 +269,36 @@ public class ProviderTest {
     assertNull(factory.session.lastTick);
   }
 
+  @Test
+  public void dataHealthTransitionsReachBothBookmapAndLogWithSeverity() {
+    FakeSessionFactory factory = new FakeSessionFactory();
+    Provider provider = new Provider(factory);
+    RecordingAdminListener admin = new RecordingAdminListener();
+    provider.addListener(admin);
+    List<String> logs = new ArrayList<String>();
+    Log.LogListener previous = Log.getListener();
+    Log.LogLevel previousLevel = Log.getLogLevel();
+    try {
+      Log.setLogLevel(Log.LogLevel.INFO);
+      Log.setListener((level, category, message, failure) -> logs.add(level + ":" + message));
+      factory.sink.onDataStatus("source=BORSA symbol=BTC state=BOOK_STALE", true);
+      factory.sink.onDataStatus("source=BORSA symbol=BTC state=BOOK_RESUMED", false);
+      assertEquals(
+          Arrays.asList(
+              "WARN:source=BORSA symbol=BTC state=BOOK_STALE",
+              "INFO:source=BORSA symbol=BTC state=BOOK_RESUMED"),
+          logs);
+      assertEquals(
+          Arrays.asList(
+              "source=BORSA symbol=BTC state=BOOK_STALE",
+              "source=BORSA symbol=BTC state=BOOK_RESUMED"),
+          admin.systemMessages);
+    } finally {
+      Log.setListener(previous);
+      Log.setLogLevel(previousLevel);
+    }
+  }
+
   /** Every default-tick fallback warns; a supported Crypto tick does not. */
   @Test
   public void warnsForPlainAndInvalidTickFallbacksOnly() {
