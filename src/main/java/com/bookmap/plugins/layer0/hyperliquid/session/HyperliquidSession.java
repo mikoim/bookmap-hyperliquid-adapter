@@ -985,10 +985,12 @@ public final class HyperliquidSession
     lossNotifiedForIncident = false;
     for (SubscriptionRecord record : records.values()) {
       if (record.state() == SubscriptionRecord.State.ACTIVE) {
+        boolean republished = false;
         if (record.feedMode() == SourceProfile.FeedMode.SEED_THEN_DELTA) {
           if (record.deltaBook().seeded()) {
             publishDepth(record, record.deltaBook().replacePublished());
             dataHealth.bookPublished(record.alias(), generation);
+            republished = true;
           }
         } else {
           com.bookmap.plugins.layer0.hyperliquid.book.OrderBookSnapshotDiff.NormalizedBookSnapshot
@@ -998,7 +1000,13 @@ public final class HyperliquidSession
             record.acceptActiveBook(book.time());
             record.takeForceFullResync();
             dataHealth.bookPublished(record.alias(), generation);
+            republished = true;
           }
+        }
+        if (!republished) {
+          // The subscription is acknowledged again but has no book yet, so freshness must be
+          // watched from here rather than waiting for a publication that may never come.
+          dataHealth.awaitBook(record.alias(), generation);
         }
         ArrayDeque<PendingTrade> pending = record.takePendingTrades();
         while (!pending.isEmpty()) {

@@ -130,8 +130,9 @@ generation, UTC time, and state-specific diagnostic details.
   promise holds and the next frame still seeds the whole view.
 
 The same ongoing condition is reported once. Recovery enables a new warning for a later incident.
-Book freshness timers stop during resynchronization and are removed when a symbol is unsubscribed
-or the session closes. Mark-price messages identify `feedSource=HYPERLIQUID` separately from the
+Book freshness timers stop during resynchronization and restart once the subscription is
+acknowledged again, so a resynchronization whose replacement book never arrives still escalates to
+`BOOK_STALE`. They are removed when a symbol is unsubscribed or the session closes. Mark-price messages identify `feedSource=HYPERLIQUID` separately from the
 selected order-book source; the two connections have independent generation numbers.
 
 ## Quality checks

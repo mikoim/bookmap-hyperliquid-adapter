@@ -123,6 +123,23 @@ public class HyperliquidSessionLifecycleTest {
   }
 
   @Test
+  public void restoredSubscriptionThatNeverReceivesABookStillReportsStaleness() {
+    Fixture fixture = fixtureWithActiveBtc();
+    fixture.beginRecovery();
+    fixture.completeSends(2);
+    fixture.ack(SubscriptionType.L2_BOOK);
+    fixture.ack(SubscriptionType.TRADES);
+    fixture.drain();
+    assertEquals(1, count(fixture.sink.events(), "connection-restored"));
+    assertEquals(0, statusCount(fixture, "BOOK_STALE"));
+
+    fixture.scheduler.advanceBy(30_000L);
+    fixture.drain();
+
+    assertEquals(1, statusCount(fixture, "BOOK_STALE"));
+  }
+
+  @Test
   public void unsubscribeAndCloseSuppressFreshnessTimers() {
     Fixture fixture = fixtureWithActiveBtc();
     fixture.session.unsubscribe("BTC");

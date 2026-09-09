@@ -68,6 +68,22 @@ final class DataHealthMonitor implements AutoCloseable {
   }
 
   /**
+   * Rearms the freshness timer for a restored subscription that has not published a book yet. A
+   * resynchronization stops the timer, so without this a reconnect whose replacement book never
+   * arrives would leave the symbol in a standing BOOK_RESYNCING and never escalate to BOOK_STALE.
+   */
+  void awaitBook(String symbol, long generation) {
+    if (closed) {
+      return;
+    }
+    Health health = health(symbol);
+    health.generation = generation;
+    if (health.timer == null) {
+      scheduleCheck(symbol, health, STALE_MILLIS);
+    }
+  }
+
+  /**
    * Reports one incident that invalidates the books of several symbols at once. A reconnect touches
    * every subscription, so each state is reported as a single message naming the affected symbols
    * rather than two messages per symbol. Per-symbol timings stay in the recovery messages.
@@ -224,10 +240,9 @@ final class DataHealthMonitor implements AutoCloseable {
   }
 
   private void check(String symbol, Health health, long checkId) {
-    if (closed
-        || symbols.get(symbol) != health
-        || health.resyncSince != null
-        || health.checkId != checkId) {
+    // A cancelled or superseded timer is neutralized by checkId alone, so a symbol that is still
+    // resynchronizing can be checked whenever awaitBook has rearmed it.
+    if (closed || symbols.get(symbol) != health || health.checkId != checkId) {
       return;
     }
     health.timer = null;
