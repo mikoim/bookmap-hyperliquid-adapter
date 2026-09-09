@@ -82,9 +82,11 @@ public class HyperliquidSessionLifecycleTest {
     fixture.subscribe("C1");
     fixture.subscribe("C2");
     fixture.completeSends(6);
-    fixture.book("BTC", "100.000", 1L);
-    fixture.book("C1", "100.000", 1L);
-    fixture.book("C2", "100.000", 1L);
+    for (String symbol : new String[] {"BTC", "C1", "C2"}) {
+      fixture.book(symbol, "100.000", 1L);
+      fixture.ack(symbol, SubscriptionType.L2_BOOK);
+      fixture.ack(symbol, SubscriptionType.TRADES);
+    }
     fixture.drain();
 
     fixture.beginRecovery();
@@ -94,6 +96,19 @@ public class HyperliquidSessionLifecycleTest {
     assertTrue(
         fixture.sink.dataStatuses().toString(),
         fixture.sink.dataStatuses().get(0).contains("symbol=BTC,C1,C2"));
+  }
+
+  @Test
+  public void disconnectIgnoresSubscriptionsThatNeverReceivedABook() {
+    Fixture fixture = new Fixture();
+    fixture.login();
+    fixture.subscribe("BTC");
+    fixture.completeSends(2);
+
+    fixture.beginRecovery();
+
+    assertEquals(0, statusCount(fixture, "BOOK_RESYNCING"));
+    assertEquals(0, statusCount(fixture, "TRADE_GAP_POSSIBLE"));
   }
 
   @Test

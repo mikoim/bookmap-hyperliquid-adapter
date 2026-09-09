@@ -196,7 +196,7 @@ public final class HyperliquidSession
             if (!closed && connectionState != ConnectionState.STOPPED) {
               sink.onSystemMessage("market-data frame queue overflow", MessageKind.UNCLASSIFIED);
               dataHealth.resync(
-                  trackedAliases(), currentGeneration, "market-data frame queue overflow");
+                  activeAliases(), currentGeneration, "market-data frame queue overflow");
               dispatcher.discardMarketFrames();
               for (SubscriptionRecord record : records.values()) {
                 if (record.state() == SubscriptionRecord.State.ACTIVE) {
@@ -372,7 +372,7 @@ public final class HyperliquidSession
   public void onDisconnected(long generation, TransportFailure failure) {
     if (!closed && generation == currentGeneration) {
       dataHealth.resync(
-          trackedAliases(), generation, failure == null ? "connection lost" : failure.message());
+          activeAliases(), generation, failure == null ? "connection lost" : failure.message());
       if (profile.source() == MarketDataSource.HYPERLIQUID) {
         dataHealth.markUnavailable(generation, "market-data connection lost");
       }
@@ -401,11 +401,17 @@ public final class HyperliquidSession
     }
   }
 
-  /** Aliases of every tracked subscription, so one incident reports one message per state. */
-  private List<String> trackedAliases() {
+  /**
+   * Aliases of the subscriptions a data-health incident can really affect, so one incident reports
+   * one message per state. A subscription that has not reached {@code ACTIVE} has never published a
+   * book or a trade, so it has nothing to resynchronize and no interval that could hold a gap.
+   */
+  private List<String> activeAliases() {
     List<String> aliases = new ArrayList<String>(records.size());
     for (SubscriptionRecord record : records.values()) {
-      aliases.add(record.alias());
+      if (record.state() == SubscriptionRecord.State.ACTIVE) {
+        aliases.add(record.alias());
+      }
     }
     return aliases;
   }
