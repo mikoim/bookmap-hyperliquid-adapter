@@ -4,7 +4,7 @@
 
 **Goal:** README.md に混在している利用者向け説明・内部仕様・ビルド手順を、読者別の 3 文書（`README.md` / `docs/development.md` / `AGENTS.md`）へ再編する。
 
-**Architecture:** ドキュメントのみの変更。`docs/development.md` を先に作り、`AGENTS.md` へ規約を移設して `CLAUDE.md` を `@AGENTS.md` の 1 行に縮退させ、最後に `README.md` を書き直す。この順序ならどのコミット時点でもリンク切れが発生しない。
+**Architecture:** ドキュメントのみの変更。`docs/development.md` を先に作り、`AGENTS.md` へ規約を移設して `CLAUDE.md` を `@AGENTS.md` の 1 行に縮退させ、最後に `README.md` を書き直す。Task 1 と Task 2 は互いの成果物を参照するため、Task 1 のコミット時点では `docs/development.md` からの `../AGENTS.md` リンクだけが一時的に未解決になる。Task 2 完了以降は全リンクが解決し、Task 4 で最終確認する。
 
 **Tech Stack:** Markdown のみ。コード、ビルド設定、テストは変更しない。
 
@@ -26,7 +26,7 @@
 - Create: `docs/development.md`
 
 **Interfaces:**
-- Consumes: なし
+- Consumes: `AGENTS.md`（Task 2 で作成。`Specs and plans` から `../AGENTS.md` として参照する。Task 2 完了まで未解決）
 - Produces: `docs/development.md` — Task 3 の `README.md` がこのパスへリンクする。
 
 - [ ] **Step 1: ファイルを作成する**
@@ -296,16 +296,14 @@ anomalies, INFO for recovery, subject to Bookmap's configured log level. Every m
 | `MARK_PRICE_RESUMED` | Usable mark-price data has arrived again. | Nothing. |
 
 The same ongoing condition is reported once; recovery re-arms the warning for a later incident.
-Mark-price messages carry `feedSource=HYPERLIQUID` whatever the selected order book source is,
-because that connection always goes to Hyperliquid.
+Mark prices always come from Hyperliquid, whatever the selected order book source is.
 
 ## Limits
 
 - Connection attempts, open connections, outbound frames, and subscription slots are budgeted per
-  JVM and shared by every adapter provider in it: 10 open connections, 30 connection attempts per
-  minute, 2000 outbound frames per minute, and 1000 subscription slots. Another Bookmap process, or
-  another application behind the same public IP, is invisible to that budget, so leave external
-  headroom for it and for Hyperliquid's own limits.
+  JVM and shared by every adapter provider in it; the budget allows ten concurrent connections.
+  Another Bookmap process, or another application behind the same public IP, is invisible to that
+  budget, so leave external headroom for it and for Hyperliquid's own limits.
 - Borsa and Hyperdash each need a second connection to Hyperliquid Mainnet for mark prices, which
   caps a single JVM at five relay-backed providers.
 - During a disconnect the adapter reconnects and resynchronizes, but there is no historical gap fill
@@ -324,7 +322,7 @@ Build instructions, quality gates, and the code layout are in
 Run:
 
 ```bash
-grep -nE 'szDecimals|nSigFigs|mantissa|nLevels|requestedSymbol|universe|delisted|gradlew|references/' README.md
+grep -nE 'szDecimals|nSigFigs|mantissa|nLevels|requestedSymbol|universe|delisted|feedSource|gradlew|references/' README.md
 ```
 
 Expected: 出力なし（終了コード 1）。いずれかがヒットしたら該当箇所を削除する。
