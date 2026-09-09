@@ -543,6 +543,11 @@ public final class HyperliquidSession
       return false;
     }
     if (snapshot) {
+      // A snapshot without a single usable price would erase every stored one, so the store keeps
+      // its last known view and the caller's next frame still seeds it in full.
+      if (markPrices.isEmpty()) {
+        return false;
+      }
       assetContexts.applySnapshot(markPrices);
     } else if (!shouldRepublish(assetContexts.applyDelta(markPrices))) {
       return true;

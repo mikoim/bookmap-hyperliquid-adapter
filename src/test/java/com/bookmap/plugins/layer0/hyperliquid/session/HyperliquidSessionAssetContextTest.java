@@ -113,6 +113,22 @@ public class HyperliquidSessionAssetContextTest {
     assertEquals(null, fixture.sink.lastReferencePrice("HYPE"));
   }
 
+  /** A snapshot without a single usable price keeps the last known ones and stays pending. */
+  @Test
+  public void unusableSnapshotKeepsLastKnownPricesAndStillAwaitsASnapshot() {
+    Fixture fixture = new Fixture();
+    fixture.receive(TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"87.785\"}}"));
+
+    fixture.reconnect();
+    fixture.receiveOnGeneration(
+        2L, TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"0\"}}"));
+    assertEquals("87.785", fixture.sink.lastReferencePrice("HYPE"));
+
+    fixture.receiveOnGeneration(
+        2L, TestMetadata.assetContextsFrame("{\"BTC\":{\"markPx\":\"79394.0\"}}"));
+    assertEquals(null, fixture.sink.lastReferencePrice("HYPE"));
+  }
+
   /** A rejected feed never fails login and never removes the instrument list. */
   @Test
   public void rejectedFeedIsOnlyADiagnostic() {

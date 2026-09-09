@@ -122,7 +122,9 @@ feed), connection generation, UTC time, and state-specific diagnostic details.
   the last published trade when known; they are not exact exchange-side missing-trade ranges.
 - `MARK_PRICE_UNAVAILABLE` / `MARK_PRICE_RESUMED`: the mark-price connection failed or rejected
   its subscription, and subsequently delivered usable mark-price data. Reopening the socket
-  alone does not clear the warning. Unchanging prices are not treated as a feed failure.
+  alone does not clear the warning. Unchanging prices are not treated as a feed failure. A frame
+  carrying no usable price keeps the last known prices instead of replacing them, so the warning's
+  promise holds and the next frame still seeds the whole view.
 
 The same ongoing condition is reported once. Recovery enables a new warning for a later incident.
 Book freshness timers stop during resynchronization and are removed when a symbol is unsubscribed
