@@ -3,6 +3,7 @@ package com.bookmap.plugins.layer0.hyperliquid.parse;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import java.io.ByteArrayOutputStream;
@@ -29,6 +30,10 @@ public final class AssetContextCodec {
 
   private static final int CHUNK_BYTES = 8192;
   private static final int MAX_PRICE_DIGITS = 20;
+
+  /** Stateless and thread-safe, unlike the Gson instance whose factory chain builds it. */
+  private static final TypeAdapter<JsonElement> JSON_ADAPTER =
+      new Gson().getAdapter(JsonElement.class);
 
   /**
    * Decodes one payload into positive mark prices. Entries without a usable {@code markPx} are
@@ -97,7 +102,7 @@ public final class AssetContextCodec {
       JsonReader reader = new JsonReader(new StringReader(json));
       reader.setLenient(false);
       // JsonParser and Gson.fromJson temporarily enable leniency; the adapter preserves it.
-      root = new Gson().getAdapter(JsonElement.class).read(reader);
+      root = JSON_ADAPTER.read(reader);
       if (reader.peek() != JsonToken.END_DOCUMENT) {
         throw new ProtocolException("asset context payload is not JSON");
       }
