@@ -371,11 +371,6 @@ public final class HyperliquidSession
   @Override
   public void onDisconnected(long generation, TransportFailure failure) {
     if (!closed && generation == currentGeneration) {
-      dataHealth.resync(
-          activeAliases(), generation, failure == null ? "connection lost" : failure.message());
-      if (profile.source() == MarketDataSource.HYPERLIQUID) {
-        dataHealth.markUnavailable(generation, "market-data connection lost");
-      }
       currentGeneration = -1L;
       cancelAcknowledgementTasks();
       dispatcher.discardMarketFrames();
@@ -392,8 +387,15 @@ public final class HyperliquidSession
         sink.onConnectionLost(classified, failure == null ? null : failure.message());
       }
       if (classified == ConnectionFailure.FATAL) {
+        // A session that is being torn down can never publish a replacement book, so promising a
+        // resynchronization here would leave a warning no recovery message can ever clear.
         stop(StopCause.FATAL);
       } else {
+        dataHealth.resync(
+            activeAliases(), generation, failure == null ? "connection lost" : failure.message());
+        if (profile.source() == MarketDataSource.HYPERLIQUID) {
+          dataHealth.markUnavailable(generation, "market-data connection lost");
+        }
         connectionState = ConnectionState.RECONNECTING;
         recovering = true;
         restoreNotifiedForIncident = false;

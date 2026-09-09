@@ -112,6 +112,17 @@ public class HyperliquidSessionLifecycleTest {
   }
 
   @Test
+  public void fatalDisconnectDoesNotPromiseRecovery() {
+    Fixture fixture = fixtureWithActiveBtc();
+
+    fixture.session.onDisconnected(
+        1L, new TransportFailure(TransportFailure.Kind.PROTOCOL, "bad protocol", null));
+    fixture.drain();
+
+    assertTrue(fixture.sink.dataStatuses().toString(), fixture.sink.dataStatuses().isEmpty());
+  }
+
+  @Test
   public void unsubscribeAndCloseSuppressFreshnessTimers() {
     Fixture fixture = fixtureWithActiveBtc();
     fixture.session.unsubscribe("BTC");
