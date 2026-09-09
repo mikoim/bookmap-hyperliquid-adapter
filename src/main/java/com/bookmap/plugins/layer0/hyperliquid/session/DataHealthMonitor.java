@@ -287,7 +287,7 @@ final class DataHealthMonitor implements AutoCloseable {
             + " symbol="
             + symbol
             + " generation="
-            + generation
+            + (generation < 0 ? "none" : Long.toString(generation))
             + " at="
             + timestamp(clock.getAsLong())
             + " state="

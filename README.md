@@ -109,7 +109,8 @@ Data-health transitions appear as Bookmap system messages and in the application
 anomalies and INFO for recovery (subject to Bookmap's configured log level). Every message starts
 with `data-status` and includes the selected source, environment, symbol (`*` for the mark-price
 feed, or a comma-separated list when one incident affects several symbols at once), connection
-generation, UTC time, and state-specific diagnostic details.
+generation (`none` when the connection never opened), UTC time, and state-specific diagnostic
+details.
 
 - `BOOK_STALE`: no valid book has been accepted for an active symbol for 30 seconds. An unchanged
   but valid book refreshes this timer; invalid or older books do not. This indicates reception

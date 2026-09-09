@@ -188,6 +188,20 @@ public class AssetContextFeedTest {
    * backoff, and the retried connection carries mark prices normally. On the market-data path such
    * a failure is fatal because it means login failed; for the feed it is only a diagnostic.
    */
+  /** A connection that never opened has no generation, so the message must not invent one. */
+  @Test
+  public void connectionThatNeverOpenedReportsNoGeneration() {
+    Fixture fixture = new Fixture(MarketDataSource.BORSA, false);
+
+    fixture.transport.failConnection(1, new IOException("feed unavailable"));
+    fixture.drain();
+
+    assertEquals(1, fixture.sink.dataStatuses().size());
+    String warning = fixture.sink.dataStatuses().get(0);
+    assertTrue(warning, warning.contains("state=MARK_PRICE_UNAVAILABLE"));
+    assertTrue(warning, warning.contains("generation=none"));
+  }
+
   @Test
   public void feedRetriesAConnectionThatNeverOpened() {
     Fixture fixture = new Fixture(MarketDataSource.BORSA, false);
