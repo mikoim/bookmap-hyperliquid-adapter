@@ -103,6 +103,32 @@ JVM at five relay-backed providers.
 On Testnet the instrument list holds roughly 630 symbols across about 200 perp dexes, most of them
 throwaway markets deployed by other developers.
 
+## Data freshness and gap notifications
+
+Data-health transitions appear as Bookmap system messages and in the application log: WARN for
+anomalies and INFO for recovery (subject to Bookmap's configured log level). Every message starts
+with `data-status` and includes the selected source, environment, symbol (`*` for the mark-price
+feed), connection generation, UTC time, and state-specific diagnostic details.
+
+- `BOOK_STALE`: no valid book has been accepted for an active symbol for 30 seconds. An unchanged
+  but valid book refreshes this timer; invalid or older books do not. This indicates reception
+  inactivity, not proof of a feed failure, and does not force a reconnect.
+- `BOOK_RESYNCING` / `BOOK_RESUMED`: a disconnect or market queue overflow requires a new book.
+  Resumption is reported only after a replacement book is published, even if the connection's
+  subscription acknowledgements have already arrived. `BOOK_RESUMED` also clears a stale warning.
+- `TRADE_GAP_POSSIBLE` / `TRADE_RESUMED`: disconnects and market/trade buffer overflows may lose
+  trades. A subsequent published trade ends the possible-gap interval, but historical trades
+  are not backfilled. These intervals use local processing times, conservatively starting at
+  the last published trade when known; they are not exact exchange-side missing-trade ranges.
+- `MARK_PRICE_UNAVAILABLE` / `MARK_PRICE_RESUMED`: the mark-price connection failed or rejected
+  its subscription, and subsequently delivered usable mark-price data. Reopening the socket
+  alone does not clear the warning. Unchanging prices are not treated as a feed failure.
+
+The same ongoing condition is reported once. Recovery enables a new warning for a later incident.
+Book freshness timers stop during resynchronization and are removed when a symbol is unsubscribed
+or the session closes. Mark-price messages identify `feedSource=HYPERLIQUID` separately from the
+selected order-book source; the two connections have independent generation numbers.
+
 ## Quality checks
 
 Run the independent quality gates before distributing the JAR:
