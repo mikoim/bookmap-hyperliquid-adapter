@@ -109,6 +109,11 @@ public final class Provider extends ExternalLiveBaseProvider {
     BigDecimal defaultTick =
         TickSizePlan.defaultTick(instrument.referencePrice(), instrument.priceDecimals());
     if (!(subscribeInfo instanceof SubscribeInfoCrypto)) {
+      Log.warn(
+          "Missing tick size for "
+              + subscribeInfo.symbol
+              + "; using "
+              + defaultTick.toPlainString());
       return defaultTick;
     }
     double pips = ((SubscribeInfoCrypto) subscribeInfo).pips;

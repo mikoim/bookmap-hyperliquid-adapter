@@ -52,7 +52,6 @@ public final class HyperliquidSession
   private static final int TRADE_DEDUPLICATION_CAPACITY = 10_000;
   private static final long TRADE_DEDUPLICATION_TTL_MILLIS = 600_000L;
   private static final long ASSET_CONTEXT_REPUBLISH_INTERVAL_MILLIS = 5_000L;
-  private static final long LOGIN_ASSET_CONTEXT_WAIT_MILLIS = 2_000L;
 
   private final HyperliquidConnector connector;
   private final HyperliquidMessageParser parser;
@@ -91,7 +90,6 @@ public final class HyperliquidSession
   private long currentGeneration = -1L;
   private SourceProfile profile;
   private AssetContextFeed assetContextFeed;
-  private CancellableScheduler.Cancellable loginDeadlineTask;
 
   /**
    * Creates a session using explicitly supplied connector, scheduling, and state-lane boundaries.
@@ -289,37 +287,8 @@ public final class HyperliquidSession
     } else {
       connectionState = ConnectionState.CONNECTED;
       connectedOnce = true;
-      awaitAssetContextsBeforeLogin();
-    }
-  }
-
-  /**
-   * Bookmap re-subscribes a saved workspace's instruments as soon as login succeeds, and a
-   * subscription built before the first mark price has landed keeps its coarser server-side
-   * grouping for the rest of the session, because an established record is deliberately never
-   * rebuilt. The initial connection therefore waits briefly for an asset-context snapshot. The wait
-   * is capped: a rejected, broken, or slow feed must never keep the user from logging in.
-   */
-  private void awaitAssetContextsBeforeLogin() {
-    if (assetContextPublished) {
       reportLoginSuccessful();
-      return;
     }
-    loginDeadlineTask =
-        scheduler.schedule(
-            new Runnable() {
-              @Override
-              public void run() {
-                dispatcher.submitControl(
-                    new Runnable() {
-                      @Override
-                      public void run() {
-                        reportLoginSuccessful();
-                      }
-                    });
-              }
-            },
-            LOGIN_ASSET_CONTEXT_WAIT_MILLIS);
   }
 
   /**
@@ -331,15 +300,7 @@ public final class HyperliquidSession
       return;
     }
     loginNotified = true;
-    cancelLoginDeadline();
     sink.onLoginSuccessful();
-  }
-
-  private void cancelLoginDeadline() {
-    if (loginDeadlineTask != null) {
-      loginDeadlineTask.cancel();
-      loginDeadlineTask = null;
-    }
   }
 
   /** Parses an immutable raw frame on the callback thread and schedules its output atomically. */
@@ -417,9 +378,6 @@ public final class HyperliquidSession
         }
       }
       ConnectionFailure classified = connectionFailure(failure);
-      // Bookmap must never see a connection lost for a login it was never told had succeeded, so
-      // a drop inside the asset-context wait window resolves the pending login first.
-      reportLoginSuccessful();
       if (!lossNotifiedForIncident) {
         lossNotifiedForIncident = true;
         sink.onConnectionLost(classified, failure == null ? null : failure.message());
@@ -581,7 +539,6 @@ public final class HyperliquidSession
               current.symbol(), current.sizeDecimals(), assetContexts.markPrice(current.symbol())));
     }
     sink.onKnownInstruments(new ArrayList<PerpetualInstrument>(instruments.values()));
-    reportLoginSuccessful();
     return true;
   }
 
@@ -1016,17 +973,11 @@ public final class HyperliquidSession
     if (connectionState == ConnectionState.STOPPED) {
       return;
     }
-    // A fatal stop reports a connection loss, and Bookmap must not see one for a login it was
-    // never told had succeeded; resolve a login still waiting on asset contexts first.
-    if (cause == StopCause.FATAL) {
-      reportLoginSuccessful();
-    }
     connectionState = ConnectionState.STOPPED;
     closed = true;
     currentGeneration++;
     generationInvalidated = true;
     recovering = false;
-    cancelLoginDeadline();
     cancelAcknowledgementTasks();
     dispatcher.discardMarketFrames();
     if (cause == StopCause.FATAL && loginNotified && !lossNotifiedForIncident) {

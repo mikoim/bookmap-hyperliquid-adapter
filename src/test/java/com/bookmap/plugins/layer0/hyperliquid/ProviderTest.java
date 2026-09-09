@@ -28,6 +28,7 @@ import velox.api.layer1.Layer1ApiDataAdapter;
 import velox.api.layer1.Layer1ApiInstrumentAdapter;
 import velox.api.layer1.annotations.Layer1ApiVersion;
 import velox.api.layer1.annotations.Layer1ApiVersionValue;
+import velox.api.layer1.common.Log;
 import velox.api.layer1.data.DefaultAndList;
 import velox.api.layer1.data.DisconnectionReason;
 import velox.api.layer1.data.ExtendedLoginData;
@@ -266,6 +267,45 @@ public class ProviderTest {
 
     provider.subscribe(new SubscribeInfoCrypto("UNKNOWN", "", "PERPETUAL", 0.01d, 100d));
     assertNull(factory.session.lastTick);
+  }
+
+  /** Every default-tick fallback warns; a supported Crypto tick does not. */
+  @Test
+  public void warnsForPlainAndInvalidTickFallbacksOnly() {
+    FakeSessionFactory factory = new FakeSessionFactory();
+    Provider provider = new Provider(factory);
+    factory.sink.onKnownInstruments(
+        Collections.singletonList(new PerpetualInstrument("HYPE", 2, new BigDecimal("87.785"))));
+    List<String> warnings = new ArrayList<String>();
+    Log.LogListener previous = Log.getListener();
+    Log.LogLevel previousLevel = Log.getLogLevel();
+    try {
+      Log.setLogLevel(Log.LogLevel.WARN);
+      Log.setListener(
+          (level, category, message, failure) -> {
+            if (level == Log.LogLevel.WARN) {
+              warnings.add(message);
+            }
+          });
+      provider.subscribe(new SubscribeInfoCrypto("HYPE", "", "PERPETUAL", 0.01d, 100d));
+      assertTrue(warnings.isEmpty());
+      assertEquals(new BigDecimal("0.01"), factory.session.lastTick);
+      provider.subscribe(new SubscribeInfo("HYPE", "", "PERPETUAL"));
+      assertEquals(1, warnings.size());
+      assertTrue(warnings.get(0).contains("HYPE"));
+      assertTrue(warnings.get(0).contains("0.001"));
+      assertEquals(new BigDecimal("0.001"), factory.session.lastTick);
+      double[] invalidTicks = {0d, -1d, Double.NaN, Double.POSITIVE_INFINITY, 0.00005d, 1e10d};
+      for (double tick : invalidTicks) {
+        warnings.clear();
+        provider.subscribe(new SubscribeInfoCrypto("HYPE", "", "PERPETUAL", tick, 100d));
+        assertEquals(1, warnings.size());
+        assertEquals(new BigDecimal("0.001"), factory.session.lastTick);
+      }
+    } finally {
+      Log.setListener(previous);
+      Log.setLogLevel(previousLevel);
+    }
   }
 
   /** Prevents the announced instrument and its price formatting from ignoring the chosen tick. */

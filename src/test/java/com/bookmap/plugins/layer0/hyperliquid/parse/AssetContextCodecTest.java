@@ -86,6 +86,44 @@ public class AssetContextCodecTest {
     assertRejected(TRUNCATED_JSON, "JSON");
   }
 
+  /** Gson extensions are not valid JSON, even inside otherwise unused fields. */
+  @Test
+  public void rejectsLenientJsonSyntax() throws Exception {
+    String[] invalid = {
+      "{HYPE:{markPx:'100'}}",
+      "{\"HYPE\":{\"markPx\":\"100\"}} // comment",
+      "{\"HYPE\":{\"markPx\":\"100\",\"extra\":[1,]}}",
+      "{\"HYPE\":{\"markPx\":\"100\",\"extra\":01}}",
+      "{\"HYPE\":{\"markPx\":\"100\",\"extra\":NaN}}",
+      "{\"HYPE\":{\"markPx\":\"100\"}} {}",
+      "{\"HYPE\":{\"markPx\":\"100\",\"extra\":\"raw\nline\"}}",
+      "{\"HYPE\":{\"markPx\":\"100\",\"extra\":\"\\'\"}}"
+    };
+    for (String json : invalid) {
+      assertRejected(TestDeflate.encode(json), "JSON");
+    }
+  }
+
+  /** JSON keywords are lowercase, including letters after the first character. */
+  @Test
+  public void rejectsMixedCaseKeywords() throws Exception {
+    for (String keyword : new String[] {"tRue", "falsE", "nulL"}) {
+      assertRejected(
+          TestDeflate.encode("{\"HYPE\":{\"markPx\":\"100\",\"extra\":" + keyword + "}}"), "JSON");
+    }
+  }
+
+  /** Valid escaping and nested unused fields remain accepted. */
+  @Test
+  public void acceptsStandardJsonSyntax() throws Exception {
+    Map<String, BigDecimal> prices =
+        codec.decode(
+            TestDeflate.encode(
+                " {\"HYPE\":{\"markPx\":\"100\",\"extra\":[true,false,null,-1.2e+3,"
+                    + "{\"s\":\"line\\n\\\"\\\\\"}]}} \n"));
+    assertEquals(new BigDecimal("100"), prices.get("HYPE"));
+  }
+
   /** Rejects a JSON document whose root is not an object. */
   @Test
   public void rejectsNonObjectRoot() {

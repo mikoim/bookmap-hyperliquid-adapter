@@ -52,6 +52,24 @@ public class HyperliquidSessionAssetContextTest {
     assertTrue(l2Book, l2Book.contains("\"nSigFigs\":4"));
   }
 
+  /** Workspace subscriptions made before prices arrive retain their original aggregation. */
+  @Test
+  public void subscriptionBeforeReferencePriceKeepsFullPrecisionAfterSnapshotAndReconnect() {
+    Fixture fixture = new Fixture();
+    assertEquals(1, countEvents(fixture.sink.events(), "login-successful"));
+    fixture.session.subscribe("HYPE", "", "PERPETUAL", new java.math.BigDecimal("0.01"));
+    fixture.drain();
+    fixture.transport.socket().succeedNextSend();
+    fixture.drain();
+    String original = fixture.sentBody("l2Book");
+    assertFalse(original, original.contains("nSigFigs"));
+    fixture.receive(TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"87.785\"}}"));
+    fixture.reconnect();
+    fixture.transport.socket().succeedNextSend();
+    fixture.drain();
+    assertEquals(original, fixture.sentBody("l2Book"));
+  }
+
   /** A delta touching no known instrument never rebuilds the list. */
   @Test
   public void unrelatedDeltaDoesNotRepublish() {
@@ -108,43 +126,53 @@ public class HyperliquidSessionAssetContextTest {
     assertEquals(1, fixture.sink.knownInstrumentPublications());
   }
 
-  /**
-   * Login waits for the first snapshot, because Bookmap re-subscribes a saved workspace as soon as
-   * login succeeds and a subscription made without a reference price keeps its coarse server-side
-   * grouping for the whole session.
-   */
+  /** Login is reported on open, before any reference price arrives. */
   @Test
-  public void loginWaitsForTheFirstAssetContextSnapshot() {
+  public void loginSucceedsBeforeTheFirstAssetContextSnapshot() {
     Fixture fixture = new Fixture();
-    assertEquals(0, countEvents(fixture.sink.events(), "login-successful"));
+    assertEquals(java.util.Arrays.asList("known:1", "login-successful"), fixture.sink.events());
+    assertEquals(null, fixture.sink.lastReferencePrice("HYPE"));
 
     fixture.receive(TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"87.785\"}}"));
 
-    assertEquals(1, countEvents(fixture.sink.events(), "login-successful"));
+    assertEquals(
+        java.util.Arrays.asList("known:1", "login-successful", "known:1"), fixture.sink.events());
   }
 
-  /** A rejected, broken, or merely slow feed must never keep the user from logging in. */
+  /** A missing context feed cannot delay login or cause a duplicate notification. */
   @Test
   public void loginStillSucceedsWhenNoAssetContextEverArrives() {
     Fixture fixture = new Fixture();
-
+    assertEquals(1, countEvents(fixture.sink.events(), "login-successful"));
     fixture.advance(1_999L);
-    assertEquals(0, countEvents(fixture.sink.events(), "login-successful"));
-
+    assertEquals(1, countEvents(fixture.sink.events(), "login-successful"));
     fixture.advance(1L);
     assertEquals(1, countEvents(fixture.sink.events(), "login-successful"));
   }
 
-  /** The snapshot and the timeout are two paths to one report, never two. */
+  /** Later snapshots and elapsed time never repeat the login notification. */
   @Test
   public void loginIsReportedExactlyOnce() {
     Fixture fixture = new Fixture();
-
     fixture.receive(TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"87.785\"}}"));
     fixture.advance(60_000L);
     fixture.receive(TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"88.5\"}}"));
-
     assertEquals(1, countEvents(fixture.sink.events(), "login-successful"));
+  }
+
+  /** Malformed compressed JSON is diagnostic only and cannot overwrite a valid price. */
+  @Test
+  public void invalidJsonDoesNotUpdateReferencePrices() {
+    Fixture fixture = new Fixture();
+    fixture.receive(TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"87.785\"}}"));
+    fixture.advance(5_000L);
+    fixture.receive(TestMetadata.assetContextsFrame("{HYPE:{markPx:'100'}}"));
+    assertEquals("87.785", fixture.sink.lastReferencePrice("HYPE"));
+    assertEquals(2, fixture.sink.knownInstrumentPublications());
+    assertEquals(1, countEvents(fixture.sink.events(), "diagnostic:"));
+    assertFalse(hasEvent(fixture.sink.events(), "login-failed"));
+    fixture.receive(TestMetadata.assetContextsFrame("{\"HYPE\":{\"markPx\":\"101\"}}"));
+    assertEquals("101", fixture.sink.lastReferencePrice("HYPE"));
   }
 
   /** Only the initial connection reports login; a reconnect keeps its own restore path. */

@@ -1,9 +1,13 @@
 package com.bookmap.plugins.layer0.hyperliquid.parse;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.StringReader;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -89,7 +93,16 @@ public final class AssetContextCodec {
   private static Map<String, BigDecimal> parse(String json) throws ProtocolException {
     JsonElement root;
     try {
-      root = new JsonParser().parse(json);
+      validateJsonCharacters(json);
+      JsonReader reader = new JsonReader(new StringReader(json));
+      reader.setLenient(false);
+      // JsonParser and Gson.fromJson temporarily enable leniency; the adapter preserves it.
+      root = new Gson().getAdapter(JsonElement.class).read(reader);
+      if (reader.peek() != JsonToken.END_DOCUMENT) {
+        throw new ProtocolException("asset context payload is not JSON");
+      }
+    } catch (IOException invalid) {
+      throw new ProtocolException("asset context payload is not JSON", invalid);
     } catch (RuntimeException invalid) {
       throw new ProtocolException("asset context payload is not JSON", invalid);
     }
@@ -104,6 +117,33 @@ public final class AssetContextCodec {
       }
     }
     return markPrices;
+  }
+
+  /** Covers string and keyword extensions accepted even by Gson 2.4's non-lenient reader. */
+  private static void validateJsonCharacters(String json) throws ProtocolException {
+    boolean quoted = false;
+    for (int index = 0; index < json.length(); index++) {
+      char character = json.charAt(index);
+      if (character == '"') {
+        quoted = !quoted;
+      } else if (quoted) {
+        if (character < 0x20) {
+          throw new ProtocolException("asset context payload is not JSON");
+        }
+        if (character == '\\') {
+          if (++index == json.length() || "\"\\/bfnrtu".indexOf(json.charAt(index)) < 0) {
+            throw new ProtocolException("asset context payload is not JSON");
+          }
+          // The reader validates the four hexadecimal digits following a Unicode escape.
+        }
+      } else if ("tTfFnN".indexOf(character) >= 0) {
+        String keyword = character == 't' ? "true" : character == 'f' ? "false" : "null";
+        if (!json.startsWith(keyword, index)) {
+          throw new ProtocolException("asset context payload is not JSON");
+        }
+        index += keyword.length() - 1;
+      }
+    }
   }
 
   /** Applies the same acceptance rule the metadata parser used for {@code markPx}. */
