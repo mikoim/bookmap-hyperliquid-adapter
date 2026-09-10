@@ -54,7 +54,7 @@ import velox.api.layer1.data.SubscribeInfoCrypto;
 import velox.api.layer1.data.SystemTextMessageType;
 import velox.api.layer1.data.TradeInfo;
 
-/** Bookmap Layer 0 provider for Hyperliquid perpetual market data. */
+/** Bookmap Layer 0 provider for Hyperliquid perpetual and spot market data. */
 @Layer1ApiVersion(Layer1ApiVersionValue.VERSION1)
 @Layer0LiveModule(shortName = "HYP", fullName = "Hyperliquid")
 @Layer0CredentialsFieldsManager(HyperliquidFieldManager.class)
@@ -248,7 +248,8 @@ public final class Provider extends ExternalLiveBaseProvider {
         for (Instrument instrument : instruments) {
           if (instrument != null) {
             bySymbol.put(instrument.symbol(), instrument);
-            subscribeInfo.add(new SubscribeInfo(instrument.symbol(), "", "PERPETUAL"));
+            subscribeInfo.add(
+                new SubscribeInfo(instrument.symbol(), "", instrument.market().bookmapType()));
           }
         }
       }
@@ -268,7 +269,7 @@ public final class Provider extends ExternalLiveBaseProvider {
           new InstrumentInfo(
                   alias,
                   "",
-                  "PERPETUAL",
+                  instrument.market().bookmapType(),
                   tick.doubleValue(),
                   1d,
                   null,

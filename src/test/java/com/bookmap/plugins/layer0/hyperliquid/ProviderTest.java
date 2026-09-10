@@ -372,6 +372,27 @@ public class ProviderTest {
     assertEquals("KPEPE", listener.instrument.requestedSymbol);
   }
 
+  /** Spot instruments are listed and added with the SPOT type and their BASE/QUOTE alias. */
+  @Test
+  public void spotInstrumentsUseTheSpotTypeInBookmap() {
+    FakeSessionFactory factory = new FakeSessionFactory();
+    Provider provider = new Provider(factory);
+    Instrument hype = Instrument.spot("HYPE/USDC", "@107", 2);
+    factory.sink.onKnownInstruments(Arrays.asList(Instrument.perpetual("BTC", 5), hype));
+    RecordingInstrumentListener listener = new RecordingInstrumentListener();
+    provider.addListener(listener);
+
+    factory.sink.onInstrumentAdded("HYPE/USDC", hype, new BigDecimal("0.001"));
+
+    assertEquals(
+        Arrays.asList(
+            new SubscribeInfo("BTC", "", "PERPETUAL"), new SubscribeInfo("HYPE/USDC", "", "SPOT")),
+        provider.getSupportedFeatures().knownInstruments);
+    assertEquals("HYPE/USDC", listener.alias);
+    assertEquals("SPOT", listener.instrument.type);
+    assertEquals("HYPE/USDC", listener.instrument.symbol);
+  }
+
   /** Prevents accidental order routing through a market-data-only adapter. */
   @Test
   public void orderEntryFailsClosedWithoutTouchingSession() {

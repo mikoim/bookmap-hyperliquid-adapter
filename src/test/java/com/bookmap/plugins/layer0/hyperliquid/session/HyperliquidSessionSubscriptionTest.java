@@ -27,6 +27,7 @@ import com.bookmap.plugins.layer0.hyperliquid.transport.TransportFailure;
 import java.lang.reflect.Constructor;
 import java.util.ArrayDeque;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.function.LongSupplier;
@@ -658,6 +659,62 @@ public class HyperliquidSessionSubscriptionTest {
     assertEquals(0, fixture.budget.reservedSubscriptionSlots());
   }
 
+  /** A spot symbol subscribes by its wire coin, and frames for that coin reach its alias. */
+  @Test
+  public void spotSymbolSubscribesByCoinAndPublishesUnderItsSymbol() {
+    Fixture fixture = new Fixture();
+    fixture.loginWithSpot();
+    fixture.sink.events().clear();
+
+    fixture.session.subscribe("HYPE/USDC", "", "SPOT");
+    fixture.drain();
+    fixture.completeSubscriptionSends();
+    fixture.receive(book("@1", 1L, "82.940000", "1.5"));
+    fixture.receive(ackFor("@1", SubscriptionType.L2_BOOK));
+    fixture.receive(ackFor("@1", SubscriptionType.TRADES));
+    fixture.drain();
+
+    List<String> sent = fixture.transport.socket().successfulSendBodies();
+    assertTrue(sent.toString(), sent.toString().contains("\"coin\":\"@1\""));
+    assertFalse(sent.toString(), sent.toString().contains("HYPE/USDC"));
+    assertEquals(Collections.singletonList("HYPE/USDC"), fixture.sink.addedAliases());
+    assertTrue(
+        fixture.sink.events().toString(),
+        fixture.sink.events().contains("depth:HYPE/USDC:82940000:150"));
+  }
+
+  /** The Bookmap type must match the instrument's market; a mismatch is not found. */
+  @Test
+  public void typeMismatchIsNotFoundForBothMarkets() {
+    Fixture fixture = new Fixture();
+    fixture.loginWithSpot();
+    fixture.sink.events().clear();
+
+    fixture.session.subscribe("HYPE/USDC", "", "PERPETUAL");
+    fixture.session.subscribe("BTC", "", "SPOT");
+    fixture.drain();
+
+    assertEquals(Arrays.asList("not-found:HYPE/USDC", "not-found:BTC"), fixture.sink.events());
+    assertEquals(0, fixture.budget.reservedSubscriptionSlots());
+  }
+
+  /** Unsubscribing by the BASE/QUOTE alias finds the record that is keyed by its coin. */
+  @Test
+  public void spotUnsubscribeByAliasReleasesBothSlots() {
+    Fixture fixture = new Fixture();
+    fixture.loginWithSpot();
+
+    fixture.session.subscribe("HYPE/USDC", "", "SPOT");
+    fixture.drain();
+    fixture.completeSubscriptionSends();
+    assertEquals(2, fixture.budget.reservedSubscriptionSlots());
+
+    fixture.session.unsubscribe("HYPE/USDC");
+    fixture.drain();
+
+    assertEquals(0, fixture.budget.reservedSubscriptionSlots());
+  }
+
   private static String ack(SubscriptionType type) {
     return ackFor("BTC", type);
   }
@@ -819,6 +876,19 @@ public class HyperliquidSessionSubscriptionTest {
       }
       metadata.append("]}");
       transport.completeMeta(200, TestMetadata.allPerpMetas(metadata.toString()));
+      drain();
+      transport.openSocket();
+      drain();
+      transport.socket().succeedNextSend();
+      drain();
+    }
+
+    /** Logs in with BTC (perp) and HYPE/USDC (spot, coin @1). */
+    void loginWithSpot() {
+      session.login(SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
+      drain();
+      transport.completeSpotMeta(200, TestMetadata.spotMetaWithUsdcPairs("HYPE"));
+      transport.completeMeta(200, TestMetadata.allPerpMetas(TestMetadata.universe("BTC")));
       drain();
       transport.openSocket();
       drain();

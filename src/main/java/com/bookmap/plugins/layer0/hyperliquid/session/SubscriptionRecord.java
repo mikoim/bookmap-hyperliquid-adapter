@@ -71,9 +71,8 @@ public final class SubscriptionRecord {
     this.activationDeadlineMillis = activationDeadlineMillis;
     this.feedMode = feedMode;
     this.bucketer = bucketer;
-    l2BookKey =
-        new SubscriptionKey(instrument.symbol(), SubscriptionType.L2_BOOK, l2BookParameters);
-    tradesKey = new SubscriptionKey(instrument.symbol(), SubscriptionType.TRADES);
+    l2BookKey = new SubscriptionKey(instrument.coin(), SubscriptionType.L2_BOOK, l2BookParameters);
+    tradesKey = new SubscriptionKey(instrument.coin(), SubscriptionType.TRADES);
     diff = new OrderBookSnapshotDiff(instrument, bucketer);
     deltaBook =
         feedMode == SourceProfile.FeedMode.SEED_THEN_DELTA
@@ -122,6 +121,11 @@ public final class SubscriptionRecord {
   /** Returns the instrument metadata used to normalize provider values. */
   public Instrument instrument() {
     return instrument;
+  }
+
+  /** Returns the exchange coin this record is keyed by in the session and on the wire. */
+  public String coin() {
+    return instrument.coin();
   }
 
   /** Returns the l2-book provider subscription key. */

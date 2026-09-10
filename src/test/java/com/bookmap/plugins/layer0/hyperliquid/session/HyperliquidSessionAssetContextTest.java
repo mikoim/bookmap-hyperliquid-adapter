@@ -2,6 +2,7 @@ package com.bookmap.plugins.layer0.hyperliquid.session;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import com.bookmap.plugins.layer0.hyperliquid.FakeHyperliquidTransport;
@@ -205,6 +206,17 @@ public class HyperliquidSessionAssetContextTest {
     assertEquals(1, countEvents(fixture.sink.events(), "login-successful"));
   }
 
+  /** The fastAssetCtxs entry for the spot coin becomes the reference price of BASE/QUOTE. */
+  @Test
+  public void spotMarkPriceIsLookedUpByCoin() {
+    Fixture fixture = new Fixture(true);
+
+    fixture.receive(TestMetadata.assetContextsFrame("{\"@1\":{\"markPx\":\"82.94\"}}"));
+
+    assertEquals("82.94", fixture.sink.lastReferencePrice("HYPE/USDC"));
+    assertNull(fixture.sink.lastReferencePrice("@1"));
+  }
+
   /** RecordingSessionSink appends the failure reason, so events are matched by prefix. */
   private static boolean hasEvent(List<String> events, String prefix) {
     for (String event : events) {
@@ -260,9 +272,19 @@ public class HyperliquidSessionAssetContextTest {
             HyperliquidSessionAssetContextTest::noop);
 
     Fixture() {
+      this(false);
+    }
+
+    /** With {@code withSpot}, logs in with BTC (perp) and HYPE/USDC (spot, coin @1). */
+    Fixture(boolean withSpot) {
       session.login(SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
       drain();
-      transport.completeMeta(200, TestMetadata.allPerpMetas(TestMetadata.universe("HYPE")));
+      if (withSpot) {
+        transport.completeSpotMeta(200, TestMetadata.spotMetaWithUsdcPairs("HYPE"));
+        transport.completeMeta(200, TestMetadata.allPerpMetas(TestMetadata.universe("BTC")));
+      } else {
+        transport.completeMeta(200, TestMetadata.allPerpMetas(TestMetadata.universe("HYPE")));
+      }
       drain();
       transport.openSocket();
       drain();
