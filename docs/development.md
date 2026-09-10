@@ -12,7 +12,7 @@
 ./gradlew clean build
 ```
 
-The artifact is `build/libs/hyperliquid-adapter-1.3.0.jar`. It is a thin JAR: Bookmap supplies the
+The artifact is `build/libs/hyperliquid-adapter-1.4.0.jar`. It is a thin JAR: Bookmap supplies the
 Layer 0 API, Gson, and Jetty at runtime, so they are `compileOnly` here.
 
 The adapter compiles to Java 8 bytecode. The `verifyJava8Bytecode` task checks that compiled classes

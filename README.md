@@ -14,12 +14,12 @@ instruments you subscribe to. It never requests credentials and never sends orde
 
 ## Install
 
-1. Download `hyperliquid-adapter-1.3.0.jar` from the
+1. Download `hyperliquid-adapter-1.4.0.jar` from the
    [Releases page](https://github.com/mikoim/bookmap-hyperliquid-adapter/releases).
 2. Copy it into the `API/Layer0ApiModules` directory of your Bookmap installation. On Linux:
 
    ```text
-   $HOME/.bookmap/API/Layer0ApiModules/hyperliquid-adapter-1.3.0.jar
+   $HOME/.bookmap/API/Layer0ApiModules/hyperliquid-adapter-1.4.0.jar
    ```
 
 3. Restart Bookmap.
