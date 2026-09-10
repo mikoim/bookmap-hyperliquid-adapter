@@ -433,7 +433,23 @@ Claude-Session: https://claude.ai/code/session_01Hfg7WBT3CyTQYUjcbVbT24"
   }
 ```
 
-`PriceBucketerTest.java`: `nativeRange` の期待値を `long[]` にし(`assertArrayEquals(new long[] {877840L, 877840L}, ...)` の形に 4 箇所)、`extremeNativeUnitsDoNotOverflow` を次に置き換え、テストメソッドに `throws Exception` を付ける(`bidBucket` 等が checked 例外を投げるため):
+既存の `rejectsDepthPriceOutsideIntegerRange`(`2147483.648` で `DEPTH_PRICE_OUT_OF_RANGE` を期待)は `long` 化で通らなくなるので、次に置き換える(`int` 超は正常値、`long` 超だけが範囲外):
+
+```java
+  /** Only a value beyond long is out of range; int-sized overflow is now a legitimate result. */
+  @Test
+  public void rejectsDepthPriceOutsideLongRange() throws Exception {
+    Instrument instrument = Instrument.perpetual("BTC", 3);
+
+    assertEquals(2_147_483_648L, instrument.toDepthPriceUnits(new BigDecimal("2147483.648")));
+    assertDepthConversionReason(
+        instrument,
+        new BigDecimal("9223372036854775.808"),
+        ValueConversionException.Reason.DEPTH_PRICE_OUT_OF_RANGE);
+  }
+```
+
+`PriceBucketerTest.java`: `nativeRange` の期待値を `long[]` にし(`assertArrayEquals(new long[] {877840L, 877840L}, ...)` の形に、削除する `extremeNativeUnitsDoNotOverflow` 以外の 3 箇所)、`extremeNativeUnitsDoNotOverflow` を次に置き換え、テストメソッドに `throws Exception` を付ける(`bidBucket` 等が checked 例外を投げるため):
 
 ```java
   /** XAUT0/USDC: 4378.7 on the 1e-6 grid is 4.4e9 native units; the 0.1 tick maps it to 43787. */
@@ -1320,7 +1336,7 @@ Claude-Session: https://claude.ai/code/session_01Hfg7WBT3CyTQYUjcbVbT24"
   }
 ```
 
-注意: `closeCancelsOutstandingMetadataAndSuppressesLateCallback`(コネクタテスト)は `close()` 後に `completeMeta` を呼ぶ。取り消し済みリクエストは `pending` に該当しないので `requirePending` が失敗する。このテストは Step 2 で `lateCompleteMeta` を使う形に直す。同様に `AssetContextFeedTest` の `completeMeta` 呼び出しは、feed 接続がメタデータを要求しない(`startWithoutMetadata`)場合に該当リクエストがない。`grep -n completeMeta src/test/java/com/bookmap/plugins/layer0/hyperliquid/session/AssetContextFeedTest.java` で確認し、実際に allPerpMetas を発行していない文脈なら `lateCompleteMeta` に置き換える。発行している文脈ならそのままでよい。
+注意: `closeCancelsOutstandingMetadataAndSuppressesLateCallback`(コネクタテスト)は `close()` 後に `completeMeta` を呼ぶ。取り消し済みリクエストは `pending` に該当しないので `requirePending` が失敗する。このテストは Step 2 で `lateCompleteMeta` を使う形に直す。`HyperliquidSessionLifecycleTest` の `closeDuringMetadataCompletionSuppressesLateLoginAndConnect`(行 718 付近)も `session.close()` 後に `completeMeta` を呼ぶので、同じく `lateCompleteMeta(200, ...)` に置き換える(アサーションは不変)。同様に `AssetContextFeedTest` の `completeMeta` 呼び出しは、feed 接続がメタデータを要求しない(`startWithoutMetadata`)場合に該当リクエストがない。`grep -n completeMeta src/test/java/com/bookmap/plugins/layer0/hyperliquid/session/AssetContextFeedTest.java` で確認し、実際に allPerpMetas を発行していない文脈なら `lateCompleteMeta` に置き換える。発行している文脈ならそのままでよい。
 
 - [ ] **Step 2: 失敗するテストを書く**
 
@@ -1653,9 +1669,9 @@ Claude-Session: https://claude.ai/code/session_01Hfg7WBT3CyTQYUjcbVbT24"
     fixture.session.subscribe("HYPE/USDC", "", "SPOT");
     fixture.drain();
     fixture.completeSubscriptionSends();
-    fixture.receive(fixture.book("@1", 1L, "82.940000", "1.5"));
-    fixture.receive(fixture.ack("@1", SubscriptionType.L2_BOOK));
-    fixture.receive(fixture.ack("@1", SubscriptionType.TRADES));
+    fixture.receive(book("@1", 1L, "82.940000", "1.5"));
+    fixture.receive(ackFor("@1", SubscriptionType.L2_BOOK));
+    fixture.receive(ackFor("@1", SubscriptionType.TRADES));
     fixture.drain();
 
     List<String> sent = fixture.transport.socket().successfulSendBodies();
@@ -1698,7 +1714,7 @@ Claude-Session: https://claude.ai/code/session_01Hfg7WBT3CyTQYUjcbVbT24"
   }
 ```
 
-既存フィクスチャの `book(coin, time, price, size)` と `ack(SubscriptionType)` ヘルパーの実際のシグネチャは `grep -n 'String book(\|String ack(' src/test/java/com/bookmap/plugins/layer0/hyperliquid/session/HyperliquidSessionSubscriptionTest.java` で確認する。`ack` が coin を引数に取らない場合(BTC 固定)、`ack(String coin, SubscriptionType type)` のオーバーロードを追加し、既存版はそれに委譲させる。`sink.addedAliases()` が無ければ `RecordingSessionSink` に `List<String> addedAliases()` アクセサを追加する(フィールド `addedAliases` は既に存在)。depth イベントの期待値は `82.94` × 10^6 = `82940000`(spot HYPE は szDecimals 2 → priceDecimals 6、identity tick なので bucket = native)と size `1.5` × 100 = `150`。
+`book(String coin, long time, String price, String size)` と `ackFor(String coin, SubscriptionType type)` はこのテストクラス既存の static ヘルパー(行 661〜675 付近)で、追加は不要。`sink.addedAliases()` が無ければ `RecordingSessionSink` に `List<String> addedAliases()` アクセサを追加する(フィールド `addedAliases` は既に存在)。depth イベントの期待値は `82.94` × 10^6 = `82940000`(spot HYPE は szDecimals 2 → priceDecimals 6、identity tick なので bucket = native)と size `1.5` × 100 = `150`。
 
 `HyperliquidSessionAssetContextTest.java` に追加(フィクスチャの login 手順は既存のものを確認し、`completeMeta` の直前に `completeSpotMeta` を差し込む `loginWithSpot()` を同様に追加する):
 
@@ -1724,10 +1740,12 @@ Claude-Session: https://claude.ai/code/session_01Hfg7WBT3CyTQYUjcbVbT24"
   /** Spot instruments are listed and added with the SPOT type and their BASE/QUOTE alias. */
   @Test
   public void spotInstrumentsUseTheSpotTypeInBookmap() {
-    Provider provider = newProvider();
+    FakeSessionFactory factory = new FakeSessionFactory();
+    Provider provider = new Provider(factory);
     Instrument hype = Instrument.spot("HYPE/USDC", "@107", 2);
-    factory.sink.onKnownInstruments(
-        Arrays.asList(Instrument.perpetual("BTC", 5), hype));
+    factory.sink.onKnownInstruments(Arrays.asList(Instrument.perpetual("BTC", 5), hype));
+    RecordingInstrumentListener listener = new RecordingInstrumentListener();
+    provider.addListener(listener);
 
     factory.sink.onInstrumentAdded("HYPE/USDC", hype, new BigDecimal("0.001"));
 
@@ -1735,12 +1753,13 @@ Claude-Session: https://claude.ai/code/session_01Hfg7WBT3CyTQYUjcbVbT24"
         Arrays.asList(
             new SubscribeInfo("BTC", "", "PERPETUAL"), new SubscribeInfo("HYPE/USDC", "", "SPOT")),
         provider.getSupportedFeatures().knownInstruments);
-    assertEquals("SPOT", instrumentListener.lastInfo.type);
-    assertEquals("HYPE/USDC", instrumentListener.lastInfo.symbol);
+    assertEquals("HYPE/USDC", listener.alias);
+    assertEquals("SPOT", listener.instrument.type);
+    assertEquals("HYPE/USDC", listener.instrument.symbol);
   }
 ```
 
-`newProvider()`、`factory`、`instrumentListener` は `ProviderTest` の既存フィクスチャ名に合わせる(`sed -n 90,145p src/test/java/com/bookmap/plugins/layer0/hyperliquid/ProviderTest.java` で確認して同じ構築手順を使う)。`SubscribeInfo` に `equals` があるかも確認し、無ければ `symbol` / `type` を個別に比較する。
+`FakeSessionFactory` と `RecordingInstrumentListener`(フィールド `alias`、`instrument`)は `ProviderTest` 既存の内部クラス。`SubscribeInfo` の比較は既存テスト `preservesBookmapInstrumentMetadataAndDefensiveKnownSnapshot` と同じ形。
 
 - [ ] **Step 2: 失敗を確認**
 
