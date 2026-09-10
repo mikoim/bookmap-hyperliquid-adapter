@@ -7,6 +7,7 @@ import static org.junit.Assert.fail;
 
 import com.bookmap.plugins.layer0.hyperliquid.TestMetadata;
 import com.bookmap.plugins.layer0.hyperliquid.model.Instrument;
+import com.bookmap.plugins.layer0.hyperliquid.model.Market;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -144,10 +145,121 @@ public class HyperliquidMetaParserTest {
                 + "{\"name\":\"OLD\",\"szDecimals\":7,\"isDelisted\":true}]}"));
   }
 
+  /** Spot pairs display as BASE/QUOTE, subscribe by the universe name, and size by the base. */
+  @Test
+  public void parsesSpotPairsFromTokensAndUniverse() throws Exception {
+    String json =
+        TestMetadata.spotMeta(
+            TestMetadata.spotToken(0, "USDC", 8)
+                + ","
+                + TestMetadata.spotToken(1, "PURR", 0)
+                + ","
+                + TestMetadata.spotToken(2, "HFUN", 2)
+                + ","
+                + TestMetadata.spotToken(360, "USDT0", 2)
+                + ","
+                + TestMetadata.spotToken(400, "XAUT0", 2),
+            TestMetadata.spotPair("PURR/USDC", 1, 0)
+                + ","
+                + TestMetadata.spotPair("@1", 2, 0)
+                + ","
+                + TestMetadata.spotPair("@209", 400, 360));
+
+    List<Instrument> result = parser.parseSpotMeta(json);
+
+    assertEquals(Arrays.asList("PURR/USDC", "HFUN/USDC", "XAUT0/USDT0"), symbols(result));
+    assertEquals(Arrays.asList("PURR/USDC", "@1", "@209"), coins(result));
+    assertEquals(Market.SPOT, result.get(0).market());
+    assertEquals(8, result.get(0).priceDecimals());
+    assertEquals(6, result.get(1).priceDecimals());
+    assertNull(result.get(2).referencePrice());
+  }
+
+  /** An exchange with no spot pairs is a legitimate empty list, not a protocol error. */
+  @Test
+  public void emptySpotUniverseYieldsNoInstruments() throws Exception {
+    assertTrue(parser.parseSpotMeta(TestMetadata.emptySpotMeta()).isEmpty());
+    assertTrue(
+        parser
+            .parseSpotMeta(TestMetadata.spotMeta(TestMetadata.spotToken(0, "USDC", 8), ""))
+            .isEmpty());
+  }
+
+  @Test
+  public void rejectsMalformedSpotMeta() {
+    assertSpotRejected("[]", "must be an object");
+    assertSpotRejected("{\"universe\":[]}", "tokens must be an array");
+    assertSpotRejected("{\"tokens\":[]}", "universe must be an array");
+    assertSpotRejected(
+        TestMetadata.spotMeta("", TestMetadata.spotPair("@1", 1, 0)), "unknown token index");
+    assertSpotRejected(
+        TestMetadata.spotMeta(
+            TestMetadata.spotToken(0, "USDC", 8) + "," + TestMetadata.spotToken(0, "PURR", 0), ""),
+        "duplicate index");
+    assertSpotRejected(
+        TestMetadata.spotMeta(TestMetadata.spotToken(0, "USDC", 9), ""),
+        "szDecimals must be between 0 and 8");
+    assertSpotRejected(
+        TestMetadata.spotMeta(
+            TestMetadata.spotToken(0, "USDC", 8) + "," + TestMetadata.spotToken(1, "PURR", 0),
+            "{\"name\":\"@1\",\"tokens\":[1],\"index\":1}"),
+        "two indices");
+    assertSpotRejected(
+        TestMetadata.spotMeta(
+            TestMetadata.spotToken(0, "USDC", 8) + "," + TestMetadata.spotToken(1, "PURR", 0),
+            TestMetadata.spotPair("@1", 1, 0) + "," + TestMetadata.spotPair("@1", 1, 0)),
+        "duplicate name");
+    assertSpotRejected(
+        TestMetadata.spotMeta(
+            TestMetadata.spotToken(0, "USDC", 8) + "," + TestMetadata.spotToken(1, "PURR", 0),
+            TestMetadata.spotPair("@1", 1, 0) + "," + TestMetadata.spotPair("@2", 1, 0)),
+        "duplicate pair");
+    assertSpotRejected("not json", "invalid metadata JSON");
+  }
+
+  /** Perp and spot lists merge in order; a repeated symbol or coin is a protocol error. */
+  @Test
+  public void combineRejectsRepeatedSymbolsAndCoins() throws Exception {
+    List<Instrument> perps = Arrays.asList(Instrument.perpetual("BTC", 5));
+    List<Instrument> spots = Arrays.asList(Instrument.spot("HYPE/USDC", "@107", 2));
+
+    assertEquals(
+        Arrays.asList("BTC", "HYPE/USDC"), symbols(HyperliquidMetaParser.combine(perps, spots)));
+    try {
+      HyperliquidMetaParser.combine(perps, Arrays.asList(Instrument.spot("BTC", "@5", 2)));
+      fail("repeated symbol must be rejected");
+    } catch (ProtocolException expected) {
+      assertTrue(expected.getMessage(), expected.getMessage().contains("BTC"));
+    }
+    try {
+      HyperliquidMetaParser.combine(perps, Arrays.asList(Instrument.spot("BTC/USDC", "BTC", 2)));
+      fail("repeated coin must be rejected");
+    } catch (ProtocolException expected) {
+      assertTrue(expected.getMessage(), expected.getMessage().contains("BTC"));
+    }
+  }
+
+  private void assertSpotRejected(String json, String messageFragment) {
+    try {
+      parser.parseSpotMeta(json);
+      fail("expected rejection: " + messageFragment);
+    } catch (ProtocolException expected) {
+      assertTrue(expected.getMessage(), expected.getMessage().contains(messageFragment));
+    }
+  }
+
   private List<String> symbols(List<Instrument> instruments) {
     List<String> result = new ArrayList<String>();
     for (Instrument instrument : instruments) {
       result.add(instrument.symbol());
+    }
+    return result;
+  }
+
+  private static List<String> coins(List<Instrument> instruments) {
+    List<String> result = new ArrayList<String>();
+    for (Instrument instrument : instruments) {
+      result.add(instrument.coin());
     }
     return result;
   }

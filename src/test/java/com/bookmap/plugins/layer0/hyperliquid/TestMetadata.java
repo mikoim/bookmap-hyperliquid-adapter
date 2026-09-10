@@ -5,7 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.zip.Deflater;
 
-/** Builds allPerpMetas responses and fastAssetCtxs frames for tests. */
+/** Builds allPerpMetas and spotMeta responses and fastAssetCtxs frames for tests. */
 public final class TestMetadata {
 
   private TestMetadata() {
@@ -56,5 +56,57 @@ public final class TestMetadata {
       result.append(metaObjects[index]);
     }
     return result.append(']').toString();
+  }
+
+  /** Returns a spotMeta response with no tokens and no pairs: the default for perp-only tests. */
+  public static String emptySpotMeta() {
+    return "{\"tokens\":[],\"universe\":[]}";
+  }
+
+  /** Wraps token and pair JSON fragments as a spotMeta response. */
+  public static String spotMeta(String tokensJson, String universeJson) {
+    return "{\"tokens\":[" + tokensJson + "],\"universe\":[" + universeJson + "]}";
+  }
+
+  /** Returns one spotMeta token entry with the fields the adapter reads plus realistic noise. */
+  public static String spotToken(int index, String name, int szDecimals) {
+    return "{\"name\":\""
+        + name
+        + "\",\"szDecimals\":"
+        + szDecimals
+        + ",\"weiDecimals\":8,\"index\":"
+        + index
+        + ",\"tokenId\":\"0x0\",\"isCanonical\":false,\"evmContract\":null,\"fullName\":null}";
+  }
+
+  /** Returns one spotMeta universe entry. */
+  public static String spotPair(String name, int baseIndex, int quoteIndex) {
+    return "{\"name\":\""
+        + name
+        + "\",\"tokens\":["
+        + baseIndex
+        + ","
+        + quoteIndex
+        + "],\"index\":"
+        + Math.max(baseIndex - 1, 0)
+        + ",\"isCanonical\":false}";
+  }
+
+  /**
+   * Returns a spotMeta response quoting every base in USDC (token 0, szDecimals 8). Base {@code i}
+   * is token {@code i + 1} with szDecimals 2, and its pair is {@code @(i + 1)}, so the first base
+   * becomes {@code BASE/USDC} with coin {@code @1}.
+   */
+  public static String spotMetaWithUsdcPairs(String... baseNames) {
+    StringBuilder tokens = new StringBuilder(spotToken(0, "USDC", 8));
+    StringBuilder universe = new StringBuilder();
+    for (int i = 0; i < baseNames.length; i++) {
+      tokens.append(',').append(spotToken(i + 1, baseNames[i], 2));
+      if (i != 0) {
+        universe.append(',');
+      }
+      universe.append(spotPair("@" + (i + 1), i + 1, 0));
+    }
+    return spotMeta(tokens.toString(), universe.toString());
   }
 }
