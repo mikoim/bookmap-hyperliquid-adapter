@@ -277,6 +277,49 @@ public class ProviderEndToEndTest {
     fixture.assertClosed();
   }
 
+  /** A spot pair lists as BASE/QUOTE, subscribes as @index, and prices from its own mark price. */
+  @Test
+  public void spotInstrumentFlowsEndToEnd() {
+    Fixture fixture = new Fixture(budget(4, 20, 20, 4));
+    fixture.loginWithSpotMetadata("BTC");
+    fixture.frame(TestMetadata.assetContextsFrame("{\"@1\":{\"markPx\":\"82.94\"}}"));
+    fixture.drain();
+
+    fixture.subscribeSpot("HYPE/USDC");
+    fixture.completeSends();
+    fixture.ack("@1", "l2Book");
+    fixture.ack("@1", "trades");
+    fixture.book("@1", 1L, "82.939", "1.5", "82.941", "2.5");
+    fixture.trade("@1", "B", "82.941", "1.0", 2L, 9L);
+    fixture.drain();
+
+    assertEquals(Collections.singletonList("HYPE/USDC"), fixture.instruments.added);
+    assertEquals("SPOT", fixture.instruments.lastInfo.type);
+    assertEquals(0.001d, fixture.instruments.lastInfo.pips, 1e-12d);
+    String sent = fixture.transport.socket().successfulSendBodies().toString();
+    assertTrue(sent, sent.contains("\"coin\":\"@1\""));
+    assertFalse(sent, sent.contains("HYPE/USDC"));
+    assertFalse(fixture.data.depths.toString(), fixture.data.depths.isEmpty());
+    assertFalse(fixture.data.trades.toString(), fixture.data.trades.isEmpty());
+    fixture.closeTwice();
+    fixture.assertClosed();
+  }
+
+  /** Requesting a spot symbol under the PERPETUAL type is not found and reserves nothing. */
+  @Test
+  public void spotSymbolUnderPerpetualTypeIsNotFound() {
+    Fixture fixture = new Fixture(budget(4, 20, 20, 4));
+    fixture.loginWithSpotMetadata("BTC");
+
+    fixture.subscribe("HYPE/USDC");
+    fixture.completeSends();
+
+    assertTrue(fixture.instruments.added.isEmpty());
+    assertFalse(fixture.instruments.notFound.isEmpty());
+    fixture.closeTwice();
+    fixture.assertClosed();
+  }
+
   @Test
   public void targetedRejectionRemovesOnlyOneAliasAndUntargetedErrorIsFatal() {
     Fixture fixture = new Fixture(budget(2, 20, 50, 4));
@@ -793,6 +836,24 @@ public class ProviderEndToEndTest {
       drain();
     }
 
+    /** Logs in on Mainnet with the given perp symbols plus HYPE/USDC (spot, coin @1). */
+    private void loginWithSpotMetadata(String... perpSymbols) {
+      provider.login(mainnetLogin());
+      drain();
+      transport.completeSpotMeta(200, TestMetadata.spotMetaWithUsdcPairs("HYPE"));
+      transport.completeMeta(200, metadata(perpSymbols));
+      drain();
+      transport.openSocket();
+      drain();
+      transport.socket().succeedNextSend();
+      drain();
+    }
+
+    private void subscribeSpot(String symbol) {
+      provider.subscribe(new SubscribeInfo(symbol, "", "SPOT"));
+      drain();
+    }
+
     private void subscribe(String symbol) {
       provider.subscribe(new SubscribeInfo(symbol, "", "PERPETUAL"));
       drain();
@@ -1069,6 +1130,7 @@ public class ProviderEndToEndTest {
     private final List<String> trace;
     private final List<String> added = new ArrayList<String>();
     private final List<String> removed = new ArrayList<String>();
+    private final List<String> notFound = new ArrayList<String>();
     private velox.api.layer1.data.InstrumentInfo lastInfo;
 
     private RecordingInstrument(List<String> trace) {
@@ -1086,6 +1148,12 @@ public class ProviderEndToEndTest {
     public void onInstrumentRemoved(String alias) {
       removed.add(alias);
       trace.add("removed:" + alias);
+    }
+
+    @Override
+    public void onInstrumentNotFound(String symbol, String exchange, String type) {
+      notFound.add(symbol);
+      trace.add("notFound:" + symbol);
     }
   }
 
