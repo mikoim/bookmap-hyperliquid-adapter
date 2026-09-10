@@ -3,7 +3,7 @@ package com.bookmap.plugins.layer0.hyperliquid.book;
 import com.bookmap.plugins.layer0.hyperliquid.model.BookLevel;
 import com.bookmap.plugins.layer0.hyperliquid.model.BookSnapshot;
 import com.bookmap.plugins.layer0.hyperliquid.model.DepthUpdate;
-import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
+import com.bookmap.plugins.layer0.hyperliquid.model.Instrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.ValueConversionException;
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -20,18 +20,18 @@ import java.util.TreeMap;
  */
 public final class OrderBookSnapshotDiff {
 
-  private final PerpetualInstrument instrument;
+  private final Instrument instrument;
   private final PriceBucketer bucketer;
   private SortedMap<Integer, BigDecimal> bids = new TreeMap<Integer, BigDecimal>();
   private SortedMap<Integer, BigDecimal> asks = new TreeMap<Integer, BigDecimal>();
 
   /** Creates a differ that publishes on the native grid (identity bucketing). */
-  public OrderBookSnapshotDiff(PerpetualInstrument instrument) {
+  public OrderBookSnapshotDiff(Instrument instrument) {
     this(instrument, PriceBucketer.identity(instrument));
   }
 
   /** Creates a differ that publishes bucket totals at the bucketer's tick. */
-  public OrderBookSnapshotDiff(PerpetualInstrument instrument, PriceBucketer bucketer) {
+  public OrderBookSnapshotDiff(Instrument instrument, PriceBucketer bucketer) {
     this.instrument = Objects.requireNonNull(instrument, "instrument");
     this.bucketer = Objects.requireNonNull(bucketer, "bucketer");
   }

@@ -5,7 +5,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
+import com.bookmap.plugins.layer0.hyperliquid.model.Instrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.ValueConversionException;
 import java.math.BigDecimal;
 import org.junit.Test;
@@ -13,7 +13,7 @@ import org.junit.Test;
 /** Tests native-unit to tick-bucket mapping: bids floor, asks ceil. */
 public class PriceBucketerTest {
 
-  private final PerpetualInstrument hype = new PerpetualInstrument("HYPE", 2);
+  private final Instrument hype = Instrument.perpetual("HYPE", 2);
 
   @Test
   public void identityMapsEveryNativeUnitOntoItself() {

@@ -15,10 +15,10 @@ import com.bookmap.plugins.layer0.hyperliquid.concurrent.StateEventDispatcher;
 import com.bookmap.plugins.layer0.hyperliquid.model.BookSnapshot;
 import com.bookmap.plugins.layer0.hyperliquid.model.ControlEvent;
 import com.bookmap.plugins.layer0.hyperliquid.model.DepthUpdate;
+import com.bookmap.plugins.layer0.hyperliquid.model.Instrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.L2BookParameters;
 import com.bookmap.plugins.layer0.hyperliquid.model.MarketDataEvent;
 import com.bookmap.plugins.layer0.hyperliquid.model.ParsedFrame;
-import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionKey;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionType;
 import com.bookmap.plugins.layer0.hyperliquid.model.SymbolLookup;
@@ -66,8 +66,7 @@ public final class HyperliquidSession
       new BoundedTradeDeduplicator(TRADE_DEDUPLICATION_CAPACITY, TRADE_DEDUPLICATION_TTL_MILLIS);
   private final AssetContextStore assetContexts = new AssetContextStore();
   private final AssetContextConnectorFactory assetContextConnectorFactory;
-  private final Map<String, PerpetualInstrument> instruments =
-      new TreeMap<String, PerpetualInstrument>();
+  private final Map<String, Instrument> instruments = new TreeMap<String, Instrument>();
   private final Map<String, SubscriptionRecord> records = new TreeMap<String, SubscriptionRecord>();
   private final Map<SubscriptionKey, CancellableScheduler.Cancellable> acknowledgementTasks =
       new TreeMap<SubscriptionKey, CancellableScheduler.Cancellable>();
@@ -223,16 +222,16 @@ public final class HyperliquidSession
 
   /** Receives validated metadata on the connector's serialized state lane. */
   @Override
-  public void onMetadata(List<PerpetualInstrument> metadata) {
+  public void onMetadata(List<Instrument> metadata) {
     if (closed) {
       return;
     }
     instruments.clear();
-    for (PerpetualInstrument instrument : metadata) {
+    for (Instrument instrument : metadata) {
       instruments.put(instrument.symbol(), instrument);
     }
     metadataReceived = true;
-    sink.onKnownInstruments(new ArrayList<PerpetualInstrument>(instruments.values()));
+    sink.onKnownInstruments(new ArrayList<Instrument>(instruments.values()));
     startAssetContextFeedIfNeeded();
   }
 
@@ -438,7 +437,7 @@ public final class HyperliquidSession
       sink.onInstrumentNotFound(symbol, exchange, type);
       return;
     }
-    PerpetualInstrument instrument = SymbolLookup.resolve(instruments, symbol);
+    Instrument instrument = SymbolLookup.resolve(instruments, symbol);
     if (instrument == null) {
       sink.onDiagnostic("no unique instrument matches " + symbol);
       sink.onInstrumentNotFound(symbol, exchange, type);
@@ -567,13 +566,11 @@ public final class HyperliquidSession
     }
     assetContextPublished = true;
     lastAssetContextPublishMillis = clock.getAsLong();
-    for (Map.Entry<String, PerpetualInstrument> entry : instruments.entrySet()) {
-      PerpetualInstrument current = entry.getValue();
-      entry.setValue(
-          new PerpetualInstrument(
-              current.symbol(), current.sizeDecimals(), assetContexts.markPrice(current.symbol())));
+    for (Map.Entry<String, Instrument> entry : instruments.entrySet()) {
+      Instrument current = entry.getValue();
+      entry.setValue(current.withReferencePrice(assetContexts.markPrice(current.symbol())));
     }
-    sink.onKnownInstruments(new ArrayList<PerpetualInstrument>(instruments.values()));
+    sink.onKnownInstruments(new ArrayList<Instrument>(instruments.values()));
     return true;
   }
 

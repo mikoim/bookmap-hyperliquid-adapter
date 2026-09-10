@@ -5,7 +5,7 @@ import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget.Co
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget.Decision;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget.FrameReservation;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.CancellableScheduler;
-import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
+import com.bookmap.plugins.layer0.hyperliquid.model.Instrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionKey;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMetaParser;
 import com.bookmap.plugins.layer0.hyperliquid.parse.ProtocolException;
@@ -48,7 +48,7 @@ public final class HyperliquidConnector implements AutoCloseable {
   public interface Listener {
 
     /** Reports validated perpetual metadata. */
-    void onMetadata(List<PerpetualInstrument> instruments);
+    void onMetadata(List<Instrument> instruments);
 
     /** Reports an unrecoverable initial-login failure. */
     void onInitialFailure(TransportFailure failure);

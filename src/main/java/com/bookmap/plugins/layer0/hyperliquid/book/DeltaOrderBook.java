@@ -3,7 +3,7 @@ package com.bookmap.plugins.layer0.hyperliquid.book;
 import com.bookmap.plugins.layer0.hyperliquid.model.BookLevel;
 import com.bookmap.plugins.layer0.hyperliquid.model.BookSnapshot;
 import com.bookmap.plugins.layer0.hyperliquid.model.DepthUpdate;
-import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
+import com.bookmap.plugins.layer0.hyperliquid.model.Instrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.ValueConversionException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -58,7 +58,7 @@ public final class DeltaOrderBook {
     }
   }
 
-  private final PerpetualInstrument instrument;
+  private final Instrument instrument;
   private final PriceBucketer bucketer;
   private final TreeMap<Integer, Integer> publishedBids = new TreeMap<Integer, Integer>();
   private final TreeMap<Integer, Integer> publishedAsks = new TreeMap<Integer, Integer>();
@@ -69,12 +69,12 @@ public final class DeltaOrderBook {
   private boolean seeded;
 
   /** Creates an empty book published on the native grid. */
-  public DeltaOrderBook(PerpetualInstrument instrument) {
+  public DeltaOrderBook(Instrument instrument) {
     this(instrument, PriceBucketer.identity(instrument));
   }
 
   /** Creates an empty book whose published levels are bucket totals at the bucketer's tick. */
-  public DeltaOrderBook(PerpetualInstrument instrument, PriceBucketer bucketer) {
+  public DeltaOrderBook(Instrument instrument, PriceBucketer bucketer) {
     this.instrument = Objects.requireNonNull(instrument, "instrument");
     this.bucketer = Objects.requireNonNull(bucketer, "bucketer");
   }

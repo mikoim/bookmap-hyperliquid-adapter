@@ -9,7 +9,7 @@ import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget.ConnectionPermit;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget.FrameReservation;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.ManualScheduler;
-import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
+import com.bookmap.plugins.layer0.hyperliquid.model.Instrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionKey;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionType;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMetaParser;
@@ -639,8 +639,8 @@ public class HyperliquidConnectorTest {
     private long lastGeneration;
 
     @Override
-    public void onMetadata(List<PerpetualInstrument> instruments) {
-      for (PerpetualInstrument instrument : instruments) {
+    public void onMetadata(List<Instrument> instruments) {
+      for (Instrument instrument : instruments) {
         instrumentNames.add(instrument.symbol());
       }
     }

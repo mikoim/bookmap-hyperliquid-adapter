@@ -7,7 +7,7 @@ import static org.junit.Assert.assertTrue;
 import com.bookmap.plugins.layer0.hyperliquid.model.BookLevel;
 import com.bookmap.plugins.layer0.hyperliquid.model.BookSnapshot;
 import com.bookmap.plugins.layer0.hyperliquid.model.DepthUpdate;
-import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
+import com.bookmap.plugins.layer0.hyperliquid.model.Instrument;
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Collections;
@@ -17,7 +17,7 @@ import org.junit.Test;
 /** Tests the seed-then-delta book used for Borsa. Prices use szDecimals=0, so 1 = 1e6 units. */
 public class DeltaOrderBookTest {
 
-  private final DeltaOrderBook book = new DeltaOrderBook(new PerpetualInstrument("BTC", 0));
+  private final DeltaOrderBook book = new DeltaOrderBook(Instrument.perpetual("BTC", 0));
 
   @Test
   public void seedIsStagedUntilPublishedAndDropsZeroSizeLevels() {
@@ -140,7 +140,7 @@ public class DeltaOrderBookTest {
 
   @Test
   public void coarseTickPublishesBucketTotalsAndFoldsDeltasIntoThem() {
-    PerpetualInstrument hype = new PerpetualInstrument("HYPE", 2);
+    Instrument hype = Instrument.perpetual("HYPE", 2);
     DeltaOrderBook coarse =
         new DeltaOrderBook(hype, new PriceBucketer(hype, new BigDecimal("0.01")));
     coarse.applySeed(
@@ -178,7 +178,7 @@ public class DeltaOrderBookTest {
 
   @Test
   public void coarseTickReplacePublishedDeletesVanishedBucketsAndReemitsStagedOnes() {
-    PerpetualInstrument hype = new PerpetualInstrument("HYPE", 2);
+    Instrument hype = Instrument.perpetual("HYPE", 2);
     DeltaOrderBook coarse =
         new DeltaOrderBook(hype, new PriceBucketer(hype, new BigDecimal("0.01")));
     coarse.applySeed(snapshot(1L, levels(level("87.784", "1")), levels(level("87.795", "1"))));
@@ -198,7 +198,7 @@ public class DeltaOrderBookTest {
 
   @Test
   public void coarseTickBucketTotalsSaturate() {
-    PerpetualInstrument hype = new PerpetualInstrument("HYPE", 2);
+    Instrument hype = Instrument.perpetual("HYPE", 2);
     DeltaOrderBook coarse =
         new DeltaOrderBook(hype, new PriceBucketer(hype, new BigDecimal("0.01")));
     coarse.applySeed(

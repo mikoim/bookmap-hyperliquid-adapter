@@ -6,8 +6,8 @@ import com.bookmap.plugins.layer0.hyperliquid.MarketDataSource;
 import com.bookmap.plugins.layer0.hyperliquid.OutboundMessage;
 import com.bookmap.plugins.layer0.hyperliquid.SourceProfile;
 import com.bookmap.plugins.layer0.hyperliquid.model.ControlEvent;
+import com.bookmap.plugins.layer0.hyperliquid.model.Instrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.ParsedFrame;
-import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMessageParser;
 import com.bookmap.plugins.layer0.hyperliquid.transport.TransportFailure;
 import java.math.BigDecimal;
@@ -65,7 +65,7 @@ final class AssetContextFeed implements HyperliquidConnector.Listener, AutoClose
   }
 
   @Override
-  public void onMetadata(List<PerpetualInstrument> instruments) {
+  public void onMetadata(List<Instrument> instruments) {
     diagnostics.accept("asset-context feed reported unexpected metadata");
   }
 

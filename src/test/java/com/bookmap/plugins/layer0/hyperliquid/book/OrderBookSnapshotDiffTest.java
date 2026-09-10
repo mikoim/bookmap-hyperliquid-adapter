@@ -8,7 +8,7 @@ import com.bookmap.plugins.layer0.hyperliquid.book.OrderBookSnapshotDiff.Snapsho
 import com.bookmap.plugins.layer0.hyperliquid.model.BookLevel;
 import com.bookmap.plugins.layer0.hyperliquid.model.BookSnapshot;
 import com.bookmap.plugins.layer0.hyperliquid.model.DepthUpdate;
-import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
+import com.bookmap.plugins.layer0.hyperliquid.model.Instrument;
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Collections;
@@ -19,7 +19,7 @@ import org.junit.Test;
 public class OrderBookSnapshotDiffTest {
 
   private final OrderBookSnapshotDiff diff =
-      new OrderBookSnapshotDiff(new PerpetualInstrument("BTC", 0));
+      new OrderBookSnapshotDiff(Instrument.perpetual("BTC", 0));
 
   @Test
   public void emitsBidThenAskDeleteThenUpsertAtAscendingPrices() {
@@ -180,7 +180,7 @@ public class OrderBookSnapshotDiffTest {
   /** Matches the aggregation Hyperliquid itself produced for nSigFigs=4 at the same instant. */
   @Test
   public void coarseTickSumsLevelsWithBidsFlooredAndAsksCeiled() {
-    PerpetualInstrument hype = new PerpetualInstrument("HYPE", 2);
+    Instrument hype = Instrument.perpetual("HYPE", 2);
     OrderBookSnapshotDiff coarse =
         new OrderBookSnapshotDiff(hype, new PriceBucketer(hype, new BigDecimal("0.01")));
 
@@ -210,7 +210,7 @@ public class OrderBookSnapshotDiffTest {
 
   @Test
   public void coarseTickEmitsOnlyChangedBucketsAndDeletesEmptiedOnes() {
-    PerpetualInstrument hype = new PerpetualInstrument("HYPE", 2);
+    Instrument hype = Instrument.perpetual("HYPE", 2);
     OrderBookSnapshotDiff coarse =
         new OrderBookSnapshotDiff(hype, new PriceBucketer(hype, new BigDecimal("0.01")));
     coarse.apply(
@@ -242,7 +242,7 @@ public class OrderBookSnapshotDiffTest {
 
   @Test
   public void bucketSumsSaturateAtIntegerMax() {
-    PerpetualInstrument hype = new PerpetualInstrument("HYPE", 2);
+    Instrument hype = Instrument.perpetual("HYPE", 2);
     OrderBookSnapshotDiff coarse =
         new OrderBookSnapshotDiff(hype, new PriceBucketer(hype, new BigDecimal("0.01")));
 

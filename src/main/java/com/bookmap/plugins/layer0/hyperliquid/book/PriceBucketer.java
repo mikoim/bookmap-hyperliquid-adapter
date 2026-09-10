@@ -1,6 +1,6 @@
 package com.bookmap.plugins.layer0.hyperliquid.book;
 
-import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
+import com.bookmap.plugins.layer0.hyperliquid.model.Instrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.TickSizePlan;
 import com.bookmap.plugins.layer0.hyperliquid.model.ValueConversionException;
 import java.math.BigDecimal;
@@ -13,19 +13,19 @@ import java.util.Objects;
  */
 public final class PriceBucketer {
 
-  private final PerpetualInstrument instrument;
+  private final Instrument instrument;
   private final BigDecimal tick;
   private final long ratio;
 
   /** Creates a bucketer for a tick that is an integer multiple of the instrument's grid. */
-  public PriceBucketer(PerpetualInstrument instrument, BigDecimal tick) {
+  public PriceBucketer(Instrument instrument, BigDecimal tick) {
     this.instrument = Objects.requireNonNull(instrument, "instrument");
     this.ratio = TickSizePlan.ratio(tick, instrument.priceDecimals());
     this.tick = tick;
   }
 
   /** Returns a bucketer whose tick is the native grid, i.e. the identity mapping. */
-  public static PriceBucketer identity(PerpetualInstrument instrument) {
+  public static PriceBucketer identity(Instrument instrument) {
     return new PriceBucketer(
         instrument, BigDecimal.ONE.scaleByPowerOfTen(-instrument.priceDecimals()));
   }

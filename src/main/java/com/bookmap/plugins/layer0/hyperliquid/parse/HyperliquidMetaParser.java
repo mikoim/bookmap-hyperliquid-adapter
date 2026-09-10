@@ -1,6 +1,6 @@
 package com.bookmap.plugins.layer0.hyperliquid.parse;
 
-import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
+import com.bookmap.plugins.layer0.hyperliquid.model.Instrument;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -19,7 +19,7 @@ public final class HyperliquidMetaParser {
    * Delisted entries are filtered only after every entry has been validated. An empty root array is
    * rejected; a response whose entries are all delisted yields an empty instrument list.
    */
-  public List<PerpetualInstrument> parseAllPerpMetas(String json) throws ProtocolException {
+  public List<Instrument> parseAllPerpMetas(String json) throws ProtocolException {
     try {
       JsonElement root = new JsonParser().parse(json);
       if (root == null || !root.isJsonArray()) {
@@ -46,10 +46,10 @@ public final class HyperliquidMetaParser {
         }
       }
 
-      List<PerpetualInstrument> instruments = new ArrayList<PerpetualInstrument>();
+      List<Instrument> instruments = new ArrayList<Instrument>();
       for (MetadataEntry entry : entries) {
         if (!entry.delisted) {
-          instruments.add(new PerpetualInstrument(entry.name, entry.sizeDecimals));
+          instruments.add(Instrument.perpetual(entry.name, entry.sizeDecimals));
         }
       }
       return instruments;

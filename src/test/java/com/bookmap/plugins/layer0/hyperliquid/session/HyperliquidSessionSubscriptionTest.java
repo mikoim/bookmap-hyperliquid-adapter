@@ -18,8 +18,8 @@ import com.bookmap.plugins.layer0.hyperliquid.concurrent.CancellableScheduler;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.StateEventDispatcher;
 import com.bookmap.plugins.layer0.hyperliquid.model.BookLevel;
 import com.bookmap.plugins.layer0.hyperliquid.model.BookSnapshot;
+import com.bookmap.plugins.layer0.hyperliquid.model.Instrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.L2BookParameters;
-import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionKey;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionType;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMessageParser;
@@ -335,7 +335,7 @@ public class HyperliquidSessionSubscriptionTest {
 
   @Test
   public void recoveryCandidateDoesNotMutateLiveBookTimeOrBaseline() {
-    PerpetualInstrument instrument = new PerpetualInstrument("BTC", 2);
+    Instrument instrument = Instrument.perpetual("BTC", 2);
     HyperliquidProcessBudget budget = budget();
     SubscriptionPermit permit = budget.tryReserveSubscriptionPair(0L).permit();
     SubscriptionRecord record =

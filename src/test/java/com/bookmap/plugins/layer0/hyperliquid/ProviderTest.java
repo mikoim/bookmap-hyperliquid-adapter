@@ -6,7 +6,7 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import com.bookmap.plugins.layer0.hyperliquid.model.DepthUpdate;
-import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
+import com.bookmap.plugins.layer0.hyperliquid.model.Instrument;
 import com.bookmap.plugins.layer0.hyperliquid.session.ConnectionFailure;
 import com.bookmap.plugins.layer0.hyperliquid.session.HyperliquidSessionApi;
 import com.bookmap.plugins.layer0.hyperliquid.session.LoginFailure;
@@ -96,7 +96,7 @@ public class ProviderTest {
   public void publishesExactAnnotationsAndMetadataFeatures() {
     FakeSessionFactory factory = new FakeSessionFactory();
     Provider provider = new Provider(factory);
-    PerpetualInstrument instrument = new PerpetualInstrument("BTC", 3);
+    Instrument instrument = Instrument.perpetual("BTC", 3);
     factory.sink.onKnownInstruments(Collections.singletonList(instrument));
 
     assertEquals(
@@ -126,8 +126,8 @@ public class ProviderTest {
   public void preservesBookmapInstrumentMetadataAndDefensiveKnownSnapshot() {
     FakeSessionFactory factory = new FakeSessionFactory();
     Provider provider = new Provider(factory);
-    PerpetualInstrument instrument = new PerpetualInstrument("ETH", 2);
-    List<PerpetualInstrument> metadata = new ArrayList<PerpetualInstrument>();
+    Instrument instrument = Instrument.perpetual("ETH", 2);
+    List<Instrument> metadata = new ArrayList<Instrument>();
     metadata.add(instrument);
     factory.sink.onKnownInstruments(metadata);
     metadata.clear();
@@ -155,7 +155,7 @@ public class ProviderTest {
     provider.addListener(admin);
     provider.addListener(instruments);
     provider.addListener(data);
-    PerpetualInstrument instrument = new PerpetualInstrument("SOL", 4);
+    Instrument instrument = Instrument.perpetual("SOL", 4);
 
     factory.sink.onLoginSuccessful();
     factory.sink.onLoginFailed(LoginFailure.NO_INTERNET_CONNECTION, "no network");
@@ -215,7 +215,7 @@ public class ProviderTest {
     FakeSessionFactory factory = new FakeSessionFactory();
     Provider provider = new Provider(factory);
     factory.sink.onKnownInstruments(
-        Collections.singletonList(new PerpetualInstrument("HYPE", 2, new BigDecimal("87.785"))));
+        Collections.singletonList(Instrument.perpetual("HYPE", 2, new BigDecimal("87.785"))));
 
     DefaultAndList<Double> pips =
         provider
@@ -236,7 +236,7 @@ public class ProviderTest {
     FakeSessionFactory factory = new FakeSessionFactory();
     Provider provider = new Provider(factory);
     factory.sink.onKnownInstruments(
-        Collections.singletonList(new PerpetualInstrument("kPEPE", 2, new BigDecimal("87.785"))));
+        Collections.singletonList(Instrument.perpetual("kPEPE", 2, new BigDecimal("87.785"))));
 
     DefaultAndList<Double> pips =
         provider
@@ -254,7 +254,7 @@ public class ProviderTest {
     FakeSessionFactory factory = new FakeSessionFactory();
     Provider provider = new Provider(factory);
     factory.sink.onKnownInstruments(
-        Collections.singletonList(new PerpetualInstrument("HYPE", 2, new BigDecimal("87.785"))));
+        Collections.singletonList(Instrument.perpetual("HYPE", 2, new BigDecimal("87.785"))));
 
     provider.subscribe(new SubscribeInfoCrypto("HYPE", "", "PERPETUAL", 0.01d, 100d));
     assertEquals(0, new BigDecimal("0.01").compareTo(factory.session.lastTick));
@@ -305,7 +305,7 @@ public class ProviderTest {
     FakeSessionFactory factory = new FakeSessionFactory();
     Provider provider = new Provider(factory);
     factory.sink.onKnownInstruments(
-        Collections.singletonList(new PerpetualInstrument("HYPE", 2, new BigDecimal("87.785"))));
+        Collections.singletonList(Instrument.perpetual("HYPE", 2, new BigDecimal("87.785"))));
     List<String> warnings = new ArrayList<String>();
     Log.LogListener previous = Log.getListener();
     Log.LogLevel previousLevel = Log.getLogLevel();
@@ -346,8 +346,7 @@ public class ProviderTest {
     RecordingInstrumentListener instruments = new RecordingInstrumentListener();
     provider.addListener(instruments);
 
-    factory.sink.onInstrumentAdded(
-        "HYPE", new PerpetualInstrument("HYPE", 2), new BigDecimal("0.01"));
+    factory.sink.onInstrumentAdded("HYPE", Instrument.perpetual("HYPE", 2), new BigDecimal("0.01"));
 
     assertEquals(0.01d, instruments.instrument.pips, 0d);
     assertEquals("87.78", provider.formatPrice("HYPE", 87.78d));
@@ -366,7 +365,7 @@ public class ProviderTest {
     provider.addListener(listener);
 
     factory.sink.onInstrumentAdded(
-        "KPEPE", new PerpetualInstrument("kPEPE", 2), new BigDecimal("0.01"));
+        "KPEPE", Instrument.perpetual("kPEPE", 2), new BigDecimal("0.01"));
 
     assertEquals("kPEPE", listener.alias);
     assertEquals("kPEPE", listener.instrument.symbol);
@@ -415,7 +414,7 @@ public class ProviderTest {
     assertEquals(Collections.singletonList(Double.valueOf(expected)), values.valueOptions);
   }
 
-  private static void assertInstrument(PerpetualInstrument expected, InstrumentInfo actual) {
+  private static void assertInstrument(Instrument expected, InstrumentInfo actual) {
     assertEquals(expected.symbol(), actual.symbol);
     assertEquals("", actual.exchange);
     assertEquals("PERPETUAL", actual.type);

@@ -19,17 +19,16 @@ public final class SymbolLookup {
    * only case-insensitive match. An unknown or ambiguous request returns null rather than guessing
    * between instruments whose names differ only by case.
    */
-  public static PerpetualInstrument resolve(
-      Map<String, PerpetualInstrument> bySymbol, String requested) {
+  public static Instrument resolve(Map<String, Instrument> bySymbol, String requested) {
     if (bySymbol == null || requested == null) {
       return null;
     }
-    PerpetualInstrument exact = bySymbol.get(requested);
+    Instrument exact = bySymbol.get(requested);
     if (exact != null) {
       return exact;
     }
-    PerpetualInstrument match = null;
-    for (Map.Entry<String, PerpetualInstrument> entry : bySymbol.entrySet()) {
+    Instrument match = null;
+    for (Map.Entry<String, Instrument> entry : bySymbol.entrySet()) {
       if (matches(entry.getKey(), requested)) {
         if (match != null) {
           return null;

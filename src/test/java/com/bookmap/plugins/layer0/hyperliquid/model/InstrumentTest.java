@@ -9,13 +9,13 @@ import com.bookmap.plugins.layer0.hyperliquid.HyperliquidEnvironment;
 import java.math.BigDecimal;
 import org.junit.Test;
 
-/** Tests exact unit conversion for perpetual instruments. */
-public class PerpetualInstrumentTest {
+/** Tests exact unit conversion for perpetual and spot instruments. */
+public class InstrumentTest {
 
   /** Ensures valid decimal values become their exact Bookmap units. */
   @Test
   public void convertsSizeAndPriceWithoutRounding() throws Exception {
-    PerpetualInstrument instrument = new PerpetualInstrument("BTC", 3);
+    Instrument instrument = Instrument.perpetual("BTC", 3);
 
     assertEquals(3, instrument.priceDecimals());
     assertEquals(0.001d, instrument.pips(), 0.0d);
@@ -35,7 +35,7 @@ public class PerpetualInstrumentTest {
         HyperliquidEnvironment.TESTNET.webSocketUri().toString());
   }
 
-  /** Rejects Hyperliquid metadata whose size scale is outside the supported range. */
+  /** Rejects perpetual metadata whose size scale is outside zero through six. */
   @Test
   public void rejectsSizeDecimalsOutsideZeroThroughSix() {
     assertRejectedSizeDecimals(-1);
@@ -45,7 +45,7 @@ public class PerpetualInstrumentTest {
   /** Classifies zero, negative, null, and fractional-unit values without rounding them. */
   @Test
   public void classifiesNonPositiveAndNonIntegralValues() {
-    PerpetualInstrument instrument = new PerpetualInstrument("BTC", 3);
+    Instrument instrument = Instrument.perpetual("BTC", 3);
 
     assertDepthConversionReason(instrument, null, ValueConversionException.Reason.NON_POSITIVE);
     assertDepthConversionReason(
@@ -59,7 +59,7 @@ public class PerpetualInstrumentTest {
   /** Saturates a valid quantity only when it exceeds Bookmap's integer capacity. */
   @Test
   public void saturatesOnlySize() throws Exception {
-    PerpetualInstrument instrument = new PerpetualInstrument("BTC", 3);
+    Instrument instrument = Instrument.perpetual("BTC", 3);
 
     assertEquals(Integer.MAX_VALUE, instrument.toSizeUnits(new BigDecimal("9999999999.999")));
   }
@@ -67,7 +67,7 @@ public class PerpetualInstrumentTest {
   /** Depth sizes accept zero for removals while trade sizes keep rejecting it. */
   @Test
   public void depthSizeUnitsAcceptZero() throws ValueConversionException {
-    PerpetualInstrument instrument = new PerpetualInstrument("BTC", 2);
+    Instrument instrument = Instrument.perpetual("BTC", 2);
 
     assertEquals(0, instrument.toDepthSizeUnits(new BigDecimal("0")));
     assertEquals(0, instrument.toDepthSizeUnits(new BigDecimal("0.00")));
@@ -85,16 +85,16 @@ public class PerpetualInstrumentTest {
   public void keepsPositiveReferencePriceAndDropsOthers() {
     assertEquals(
         new BigDecimal("87.785"),
-        new PerpetualInstrument("HYPE", 2, new BigDecimal("87.785")).referencePrice());
-    assertNull(new PerpetualInstrument("HYPE", 2).referencePrice());
-    assertNull(new PerpetualInstrument("HYPE", 2, BigDecimal.ZERO).referencePrice());
-    assertNull(new PerpetualInstrument("HYPE", 2, new BigDecimal("-1")).referencePrice());
+        Instrument.perpetual("HYPE", 2, new BigDecimal("87.785")).referencePrice());
+    assertNull(Instrument.perpetual("HYPE", 2).referencePrice());
+    assertNull(Instrument.perpetual("HYPE", 2, BigDecimal.ZERO).referencePrice());
+    assertNull(Instrument.perpetual("HYPE", 2, new BigDecimal("-1")).referencePrice());
   }
 
   /** Rejects a depth price that needs one unit more than a signed integer can hold. */
   @Test
   public void rejectsDepthPriceOutsideIntegerRange() {
-    PerpetualInstrument instrument = new PerpetualInstrument("BTC", 3);
+    Instrument instrument = Instrument.perpetual("BTC", 3);
 
     assertDepthConversionReason(
         instrument,
@@ -105,7 +105,7 @@ public class PerpetualInstrumentTest {
   /** Rejects a trade price whose exact units cannot be represented by a double. */
   @Test
   public void rejectsTradePriceAboveExactDoubleIntegerLimit() {
-    PerpetualInstrument instrument = new PerpetualInstrument("BTC", 3);
+    Instrument instrument = Instrument.perpetual("BTC", 3);
 
     assertTradeConversionReason(
         instrument,
@@ -116,7 +116,7 @@ public class PerpetualInstrumentTest {
   private void assertRejectedSizeDecimals(int sizeDecimals) {
     boolean rejected = false;
     try {
-      new PerpetualInstrument("BTC", sizeDecimals);
+      Instrument.perpetual("BTC", sizeDecimals);
     } catch (IllegalArgumentException expected) {
       rejected = true;
     }
@@ -124,7 +124,7 @@ public class PerpetualInstrumentTest {
   }
 
   private void assertDepthConversionReason(
-      PerpetualInstrument instrument, BigDecimal value, ValueConversionException.Reason reason) {
+      Instrument instrument, BigDecimal value, ValueConversionException.Reason reason) {
     try {
       instrument.toDepthPriceUnits(value);
     } catch (ValueConversionException expected) {
@@ -135,7 +135,7 @@ public class PerpetualInstrumentTest {
   }
 
   private void assertTradeConversionReason(
-      PerpetualInstrument instrument, BigDecimal value, ValueConversionException.Reason reason) {
+      Instrument instrument, BigDecimal value, ValueConversionException.Reason reason) {
     try {
       instrument.toTradePriceUnits(value);
     } catch (ValueConversionException expected) {
@@ -143,5 +143,58 @@ public class PerpetualInstrumentTest {
       return;
     }
     throw new AssertionError("Expected conversion to fail with " + reason);
+  }
+
+  /** A spot pair carries a display symbol, a wire coin, and the 8-decimal spot price rule. */
+  @Test
+  public void spotInstrumentDerivesEightDecimalPriceGrid() {
+    Instrument hype = Instrument.spot("HYPE/USDC", "@107", 2);
+
+    assertEquals("HYPE/USDC", hype.symbol());
+    assertEquals("@107", hype.coin());
+    assertEquals(Market.SPOT, hype.market());
+    assertEquals("SPOT", hype.market().bookmapType());
+    assertEquals(6, hype.priceDecimals());
+    assertEquals(1e-6d, hype.pips(), 0.0d);
+    assertNull(hype.referencePrice());
+  }
+
+  /** A perpetual keeps symbol and coin identical and the 6-decimal rule. */
+  @Test
+  public void perpetualInstrumentUsesItsSymbolAsCoin() {
+    Instrument btc = Instrument.perpetual("BTC", 5, new BigDecimal("79394.0"));
+
+    assertEquals("BTC", btc.coin());
+    assertEquals(Market.PERPETUAL, btc.market());
+    assertEquals("PERPETUAL", btc.market().bookmapType());
+    assertEquals(1, btc.priceDecimals());
+    assertEquals(new BigDecimal("79394.0"), btc.referencePrice());
+  }
+
+  /** The size-decimals ceiling follows the market: 6 for perps, 8 for spot. */
+  @Test
+  public void sizeDecimalsCeilingFollowsTheMarket() {
+    assertEquals(0, Instrument.spot("USDC/USDH", "@9", 8).priceDecimals());
+    try {
+      Instrument.spot("X/USDC", "@1", 9);
+      fail("spot szDecimals 9 must be rejected");
+    } catch (IllegalArgumentException expected) {
+      assertTrue(expected.getMessage(), expected.getMessage().contains("8"));
+    }
+  }
+
+  /** Replacing the reference price keeps every other attribute. */
+  @Test
+  public void withReferencePriceKeepsIdentity() {
+    Instrument hype = Instrument.spot("HYPE/USDC", "@107", 2);
+
+    Instrument priced = hype.withReferencePrice(new BigDecimal("82.94"));
+
+    assertEquals("HYPE/USDC", priced.symbol());
+    assertEquals("@107", priced.coin());
+    assertEquals(Market.SPOT, priced.market());
+    assertEquals(2, priced.sizeDecimals());
+    assertEquals(new BigDecimal("82.94"), priced.referencePrice());
+    assertNull(priced.withReferencePrice(new BigDecimal("-1")).referencePrice());
   }
 }

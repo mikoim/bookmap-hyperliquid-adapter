@@ -6,7 +6,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.bookmap.plugins.layer0.hyperliquid.TestMetadata;
-import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
+import com.bookmap.plugins.layer0.hyperliquid.model.Instrument;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -26,7 +26,7 @@ public class HyperliquidMetaParserTest {
                 + "{\"name\":\"ETH\",\"szDecimals\":4,\"isDelisted\":false},"
                 + "{\"name\":\"OLD\",\"szDecimals\":2,\"isDelisted\":true}]}");
 
-    List<PerpetualInstrument> result = parser.parseAllPerpMetas(json);
+    List<Instrument> result = parser.parseAllPerpMetas(json);
 
     assertEquals(Arrays.asList("BTC", "ETH"), symbols(result));
   }
@@ -34,7 +34,7 @@ public class HyperliquidMetaParserTest {
   /** Reads live instruments from every perp dex, keeping HIP-3 names fully qualified. */
   @Test
   public void readsEveryPerpDexUniverse() throws Exception {
-    List<PerpetualInstrument> instruments =
+    List<Instrument> instruments =
         parser.parseAllPerpMetas(
             TestMetadata.allPerpMetas(
                 TestMetadata.universe("BTC", "ETH"), TestMetadata.universe("xyz:CL")));
@@ -48,7 +48,7 @@ public class HyperliquidMetaParserTest {
   /** A perp dex whose whole universe is delisted contributes nothing. */
   @Test
   public void skipsFullyDelistedPerpDexes() throws Exception {
-    List<PerpetualInstrument> instruments =
+    List<Instrument> instruments =
         parser.parseAllPerpMetas(
             "[{\"universe\":[{\"name\":\"BTC\",\"szDecimals\":2}]},"
                 + "{\"universe\":[{\"name\":\"flx:OIL\",\"szDecimals\":2,\"isDelisted\":true}]}]");
@@ -69,7 +69,7 @@ public class HyperliquidMetaParserTest {
   /** All entries delisted is a legitimate response and still logs in, with nothing to list. */
   @Test
   public void acceptsAResponseWhoseEntriesAreAllDelisted() throws Exception {
-    List<PerpetualInstrument> instruments =
+    List<Instrument> instruments =
         parser.parseAllPerpMetas(
             "[{\"universe\":[{\"name\":\"BTC\",\"szDecimals\":2,\"isDelisted\":true}]},"
                 + "{\"universe\":[]}]");
@@ -144,9 +144,9 @@ public class HyperliquidMetaParserTest {
                 + "{\"name\":\"OLD\",\"szDecimals\":7,\"isDelisted\":true}]}"));
   }
 
-  private List<String> symbols(List<PerpetualInstrument> instruments) {
+  private List<String> symbols(List<Instrument> instruments) {
     List<String> result = new ArrayList<String>();
-    for (PerpetualInstrument instrument : instruments) {
+    for (Instrument instrument : instruments) {
       result.add(instrument.symbol());
     }
     return result;

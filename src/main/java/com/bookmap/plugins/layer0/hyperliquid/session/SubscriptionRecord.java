@@ -8,8 +8,8 @@ import com.bookmap.plugins.layer0.hyperliquid.book.PriceBucketer;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget.SubscriptionPermit;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.CancellableScheduler;
 import com.bookmap.plugins.layer0.hyperliquid.model.DepthUpdate;
+import com.bookmap.plugins.layer0.hyperliquid.model.Instrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.L2BookParameters;
-import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionKey;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionType;
 import com.bookmap.plugins.layer0.hyperliquid.model.TradeKey;
@@ -32,7 +32,7 @@ public final class SubscriptionRecord {
   static final int MAX_PENDING_TRADES = 1_024;
 
   private final String requestedSymbol;
-  private final PerpetualInstrument instrument;
+  private final Instrument instrument;
   private final SubscriptionPermit permit;
   private final SubscriptionKey l2BookKey;
   private final SubscriptionKey tradesKey;
@@ -59,7 +59,7 @@ public final class SubscriptionRecord {
   /** Creates an alias record with its two reserved provider subscription slots. */
   public SubscriptionRecord(
       String requestedSymbol,
-      PerpetualInstrument instrument,
+      Instrument instrument,
       SubscriptionPermit permit,
       long activationDeadlineMillis,
       SourceProfile.FeedMode feedMode,
@@ -120,7 +120,7 @@ public final class SubscriptionRecord {
   }
 
   /** Returns the instrument metadata used to normalize provider values. */
-  public PerpetualInstrument instrument() {
+  public Instrument instrument() {
     return instrument;
   }
 

@@ -4,7 +4,7 @@ import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.ExecutorScheduler;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.StateEventDispatcher;
 import com.bookmap.plugins.layer0.hyperliquid.model.DepthUpdate;
-import com.bookmap.plugins.layer0.hyperliquid.model.PerpetualInstrument;
+import com.bookmap.plugins.layer0.hyperliquid.model.Instrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.SymbolLookup;
 import com.bookmap.plugins.layer0.hyperliquid.model.TickSizePlan;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMessageParser;
@@ -66,7 +66,7 @@ public final class Provider extends ExternalLiveBaseProvider {
       "Hyperliquid adapter is read-only; order operations are not supported.";
 
   private final HyperliquidSessionApi session;
-  private volatile Map<String, PerpetualInstrument> knownBySymbol = Collections.emptyMap();
+  private volatile Map<String, Instrument> knownBySymbol = Collections.emptyMap();
   private volatile List<SubscribeInfo> knownSubscribeInfo = Collections.emptyList();
   private volatile Map<String, InstrumentInfo> activeInstruments = Collections.emptyMap();
 
@@ -102,7 +102,7 @@ public final class Provider extends ExternalLiveBaseProvider {
 
   /** Resolves the dialog's tick; unsupported values fall back to the instrument's default tick. */
   private BigDecimal tickFor(SubscribeInfo subscribeInfo) {
-    PerpetualInstrument instrument = instrumentFor(subscribeInfo);
+    Instrument instrument = instrumentFor(subscribeInfo);
     if (instrument == null) {
       return null;
     }
@@ -185,7 +185,7 @@ public final class Provider extends ExternalLiveBaseProvider {
   }
 
   private DefaultAndList<Double> pipsFor(SubscribeInfo subscribeInfo) {
-    PerpetualInstrument instrument = instrumentFor(subscribeInfo);
+    Instrument instrument = instrumentFor(subscribeInfo);
     if (instrument == null) {
       return new DefaultAndList<Double>(
           Double.valueOf(FALLBACK_PIPS), Collections.singletonList(Double.valueOf(FALLBACK_PIPS)));
@@ -200,13 +200,13 @@ public final class Provider extends ExternalLiveBaseProvider {
   }
 
   private DefaultAndList<Double> sizeMultiplierFor(SubscribeInfo subscribeInfo) {
-    PerpetualInstrument instrument = instrumentFor(subscribeInfo);
+    Instrument instrument = instrumentFor(subscribeInfo);
     double multiplier = instrument == null ? FALLBACK_PIPS : instrument.sizeMultiplier();
     return new DefaultAndList<Double>(
         Double.valueOf(multiplier), Collections.singletonList(multiplier));
   }
 
-  private PerpetualInstrument instrumentFor(SubscribeInfo subscribeInfo) {
+  private Instrument instrumentFor(SubscribeInfo subscribeInfo) {
     return subscribeInfo == null ? null : SymbolLookup.resolve(knownBySymbol, subscribeInfo.symbol);
   }
 
@@ -241,11 +241,11 @@ public final class Provider extends ExternalLiveBaseProvider {
   private final class ProviderSessionSink implements SessionSink {
 
     @Override
-    public void onKnownInstruments(List<PerpetualInstrument> instruments) {
-      Map<String, PerpetualInstrument> bySymbol = new HashMap<String, PerpetualInstrument>();
+    public void onKnownInstruments(List<Instrument> instruments) {
+      Map<String, Instrument> bySymbol = new HashMap<String, Instrument>();
       List<SubscribeInfo> subscribeInfo = new ArrayList<SubscribeInfo>();
       if (instruments != null) {
-        for (PerpetualInstrument instrument : instruments) {
+        for (Instrument instrument : instruments) {
           if (instrument != null) {
             bySymbol.put(instrument.symbol(), instrument);
             subscribeInfo.add(new SubscribeInfo(instrument.symbol(), "", "PERPETUAL"));
@@ -257,8 +257,7 @@ public final class Provider extends ExternalLiveBaseProvider {
     }
 
     @Override
-    public void onInstrumentAdded(
-        String requestedSymbol, PerpetualInstrument instrument, BigDecimal tick) {
+    public void onInstrumentAdded(String requestedSymbol, Instrument instrument, BigDecimal tick) {
       if (instrument == null) {
         return;
       }
