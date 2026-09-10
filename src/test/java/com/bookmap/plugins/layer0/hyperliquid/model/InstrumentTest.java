@@ -20,7 +20,7 @@ public class InstrumentTest {
     assertEquals(3, instrument.priceDecimals());
     assertEquals(0.001d, instrument.pips(), 0.0d);
     assertEquals(1000d, instrument.sizeMultiplier(), 0.0d);
-    assertEquals(27123456, instrument.toDepthPriceUnits(new BigDecimal("27123.456")));
+    assertEquals(27123456L, instrument.toDepthPriceUnits(new BigDecimal("27123.456")));
     assertEquals(27123456d, instrument.toTradePriceUnits(new BigDecimal("27123.456")), 0.0d);
     assertEquals(1001, instrument.toSizeUnits(new BigDecimal("1.001")));
   }
@@ -91,15 +91,24 @@ public class InstrumentTest {
     assertNull(Instrument.perpetual("HYPE", 2, new BigDecimal("-1")).referencePrice());
   }
 
-  /** Rejects a depth price that needs one unit more than a signed integer can hold. */
+  /** Only a value beyond long is out of range; int-sized overflow is now a legitimate result. */
   @Test
-  public void rejectsDepthPriceOutsideIntegerRange() {
+  public void rejectsDepthPriceOutsideLongRange() throws Exception {
     Instrument instrument = Instrument.perpetual("BTC", 3);
 
+    assertEquals(2_147_483_648L, instrument.toDepthPriceUnits(new BigDecimal("2147483.648")));
     assertDepthConversionReason(
         instrument,
-        new BigDecimal("2147483.648"),
+        new BigDecimal("9223372036854775.808"),
         ValueConversionException.Reason.DEPTH_PRICE_OUT_OF_RANGE);
+  }
+
+  /** Spot gold at 4378.7 with szDecimals 2 needs 4.4e9 native units, beyond int but within long. */
+  @Test
+  public void depthPriceUnitsExceedIntForHighPricedSpotPairs() throws Exception {
+    Instrument gold = Instrument.spot("XAUT0/USDC", "@182", 2);
+
+    assertEquals(4_378_700_000L, gold.toDepthPriceUnits(new BigDecimal("4378.7")));
   }
 
   /** Rejects a trade price whose exact units cannot be represented by a double. */

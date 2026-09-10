@@ -13,7 +13,7 @@ import java.math.RoundingMode;
 public final class Instrument {
 
   private static final BigInteger MAX_SIZE_UNITS = BigInteger.valueOf(Integer.MAX_VALUE);
-  private static final BigInteger MAX_DEPTH_PRICE_UNITS = BigInteger.valueOf(Integer.MAX_VALUE);
+  private static final BigInteger MAX_DEPTH_PRICE_UNITS = BigInteger.valueOf(Long.MAX_VALUE);
   private static final BigInteger MAX_TRADE_PRICE_UNITS =
       BigInteger.valueOf(9_007_199_254_740_992L);
 
@@ -114,13 +114,17 @@ public final class Instrument {
     return sizeMultiplier;
   }
 
-  /** Converts a price to exact depth units. */
-  public int toDepthPriceUnits(BigDecimal price) throws ValueConversionException {
+  /**
+   * Converts a price to exact native depth units on the {@code 10^-priceDecimals} grid. The result
+   * is a long so an 8-decimal spot grid still represents prices in the thousands; the bucketer maps
+   * it onto the int Bookmap tick.
+   */
+  public long toDepthPriceUnits(BigDecimal price) throws ValueConversionException {
     BigInteger units = exactUnits(price, priceDecimals);
     if (units.compareTo(MAX_DEPTH_PRICE_UNITS) > 0) {
       throw new ValueConversionException(ValueConversionException.Reason.DEPTH_PRICE_OUT_OF_RANGE);
     }
-    return units.intValue();
+    return units.longValue();
   }
 
   /** Converts a price to exact trade units. */

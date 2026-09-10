@@ -60,12 +60,12 @@ public final class DeltaOrderBook {
 
   private final Instrument instrument;
   private final PriceBucketer bucketer;
-  private final TreeMap<Integer, Integer> publishedBids = new TreeMap<Integer, Integer>();
-  private final TreeMap<Integer, Integer> publishedAsks = new TreeMap<Integer, Integer>();
+  private final TreeMap<Long, Integer> publishedBids = new TreeMap<Long, Integer>();
+  private final TreeMap<Long, Integer> publishedAsks = new TreeMap<Long, Integer>();
   private final TreeMap<Integer, Integer> publishedBidBuckets = new TreeMap<Integer, Integer>();
   private final TreeMap<Integer, Integer> publishedAskBuckets = new TreeMap<Integer, Integer>();
-  private TreeMap<Integer, Integer> stagedBids = new TreeMap<Integer, Integer>();
-  private TreeMap<Integer, Integer> stagedAsks = new TreeMap<Integer, Integer>();
+  private TreeMap<Long, Integer> stagedBids = new TreeMap<Long, Integer>();
+  private TreeMap<Long, Integer> stagedAsks = new TreeMap<Long, Integer>();
   private boolean seeded;
 
   /** Creates an empty book published on the native grid. */
@@ -87,13 +87,13 @@ public final class DeltaOrderBook {
   /** Starts a new generation: forgets the staged book and waits for a fresh seed. */
   public void beginGeneration() {
     seeded = false;
-    stagedBids = new TreeMap<Integer, Integer>();
-    stagedAsks = new TreeMap<Integer, Integer>();
+    stagedBids = new TreeMap<Long, Integer>();
+    stagedAsks = new TreeMap<Long, Integer>();
   }
 
   /** Stages a complete seed for this generation; zero-size levels are absent. */
   public Result applySeed(BookSnapshot seed) {
-    List<DepthUpdate> levels;
+    List<NativeLevel> levels;
     try {
       levels = normalize(seed, false);
     } catch (UnsupportedPriceException failure) {
@@ -102,11 +102,10 @@ public final class DeltaOrderBook {
     } catch (InvalidLevelException failure) {
       return new Result(Status.INVALID, Collections.<DepthUpdate>emptyList(), failure.getMessage());
     }
-    TreeMap<Integer, Integer> bids = new TreeMap<Integer, Integer>();
-    TreeMap<Integer, Integer> asks = new TreeMap<Integer, Integer>();
-    for (DepthUpdate level : levels) {
-      (level.bid() ? bids : asks)
-          .put(Integer.valueOf(level.price()), Integer.valueOf(level.size()));
+    TreeMap<Long, Integer> bids = new TreeMap<Long, Integer>();
+    TreeMap<Long, Integer> asks = new TreeMap<Long, Integer>();
+    for (NativeLevel level : levels) {
+      (level.bid ? bids : asks).put(Long.valueOf(level.price), Integer.valueOf(level.size));
     }
     stagedBids = bids;
     stagedAsks = asks;
@@ -120,7 +119,7 @@ public final class DeltaOrderBook {
    * emitted in the order their buckets were first touched by the delta.
    */
   public Result applyDelta(BookSnapshot delta, boolean live) {
-    List<DepthUpdate> levels;
+    List<NativeLevel> levels;
     try {
       levels = normalize(delta, true);
     } catch (UnsupportedPriceException failure) {
@@ -131,11 +130,11 @@ public final class DeltaOrderBook {
     }
     Set<Integer> touchedBidBuckets = new LinkedHashSet<Integer>();
     Set<Integer> touchedAskBuckets = new LinkedHashSet<Integer>();
-    for (DepthUpdate level : levels) {
-      TreeMap<Integer, Integer> staged = level.bid() ? stagedBids : stagedAsks;
-      TreeMap<Integer, Integer> published = level.bid() ? publishedBids : publishedAsks;
-      Integer price = Integer.valueOf(level.price());
-      if (level.size() == 0) {
+    for (NativeLevel level : levels) {
+      TreeMap<Long, Integer> staged = level.bid ? stagedBids : stagedAsks;
+      TreeMap<Long, Integer> published = level.bid ? publishedBids : publishedAsks;
+      Long price = Long.valueOf(level.price);
+      if (level.size == 0) {
         if (staged.remove(price) == null) {
           continue;
         }
@@ -143,14 +142,13 @@ public final class DeltaOrderBook {
           published.remove(price);
         }
       } else {
-        staged.put(price, Integer.valueOf(level.size()));
+        staged.put(price, Integer.valueOf(level.size));
         if (live) {
-          published.put(price, Integer.valueOf(level.size()));
+          published.put(price, Integer.valueOf(level.size));
         }
       }
       if (live) {
-        (level.bid() ? touchedBidBuckets : touchedAskBuckets)
-            .add(Integer.valueOf(bucketer.bucket(level.bid(), level.price())));
+        (level.bid ? touchedBidBuckets : touchedAskBuckets).add(Integer.valueOf(level.bucket));
       }
     }
     List<DepthUpdate> updates = new ArrayList<DepthUpdate>();
@@ -161,7 +159,7 @@ public final class DeltaOrderBook {
 
   /** Recomputes each touched bucket from the published native book and emits only real changes. */
   private void appendBucketChanges(List<DepthUpdate> updates, boolean bid, Set<Integer> touched) {
-    TreeMap<Integer, Integer> published = bid ? publishedBids : publishedAsks;
+    TreeMap<Long, Integer> published = bid ? publishedBids : publishedAsks;
     TreeMap<Integer, Integer> buckets = bid ? publishedBidBuckets : publishedAskBuckets;
     for (Integer bucket : touched) {
       int total = bucketTotal(published, bucket.intValue(), bid);
@@ -178,12 +176,10 @@ public final class DeltaOrderBook {
     }
   }
 
-  private int bucketTotal(TreeMap<Integer, Integer> nativeLevels, int bucket, boolean bid) {
-    int[] range = bucketer.nativeRange(bucket, bid);
+  private int bucketTotal(TreeMap<Long, Integer> nativeLevels, int bucket, boolean bid) {
+    long[] range = bucketer.nativeRange(bucket, bid);
     Collection<Integer> sizes =
-        nativeLevels
-            .subMap(Integer.valueOf(range[0]), true, Integer.valueOf(range[1]), true)
-            .values();
+        nativeLevels.subMap(Long.valueOf(range[0]), true, Long.valueOf(range[1]), true).values();
     long total = 0L;
     for (Integer size : sizes) {
       total += size.longValue();
@@ -191,10 +187,10 @@ public final class DeltaOrderBook {
     return PriceBucketer.saturate(total);
   }
 
-  private TreeMap<Integer, Integer> bucketize(TreeMap<Integer, Integer> nativeLevels, boolean bid) {
+  private TreeMap<Integer, Integer> bucketize(TreeMap<Long, Integer> nativeLevels, boolean bid) {
     TreeMap<Integer, Long> totals = new TreeMap<Integer, Long>();
-    for (Map.Entry<Integer, Integer> level : nativeLevels.entrySet()) {
-      Integer bucket = Integer.valueOf(bucketer.bucket(bid, level.getKey().intValue()));
+    for (Map.Entry<Long, Integer> level : nativeLevels.entrySet()) {
+      Integer bucket = Integer.valueOf(bucketOfValidated(bid, level.getKey().longValue()));
       Long total = totals.get(bucket);
       totals.put(
           bucket,
@@ -206,6 +202,15 @@ public final class DeltaOrderBook {
           entry.getKey(), Integer.valueOf(PriceBucketer.saturate(entry.getValue().longValue())));
     }
     return buckets;
+  }
+
+  /** Every stored native price was bucketed once during normalization, so this cannot fail. */
+  private int bucketOfValidated(boolean bid, long nativeUnits) {
+    try {
+      return bucketer.bucket(bid, nativeUnits);
+    } catch (ValueConversionException impossible) {
+      throw new IllegalStateException("stored native price cannot be bucketed", impossible);
+    }
   }
 
   /** Publishes every staged level for activation and records the staged book as published. */
@@ -291,19 +296,19 @@ public final class DeltaOrderBook {
     }
   }
 
-  private List<DepthUpdate> normalize(BookSnapshot snapshot, boolean keepZeroSizes)
+  private List<NativeLevel> normalize(BookSnapshot snapshot, boolean keepZeroSizes)
       throws UnsupportedPriceException, InvalidLevelException {
     if (snapshot == null) {
       throw new InvalidLevelException("Book is missing");
     }
-    List<DepthUpdate> levels = new ArrayList<DepthUpdate>();
+    List<NativeLevel> levels = new ArrayList<NativeLevel>();
     normalizeSide(snapshot.bids(), true, keepZeroSizes, levels);
     normalizeSide(snapshot.asks(), false, keepZeroSizes, levels);
     return levels;
   }
 
   private void normalizeSide(
-      List<BookLevel> side, boolean bid, boolean keepZeroSizes, List<DepthUpdate> out)
+      List<BookLevel> side, boolean bid, boolean keepZeroSizes, List<NativeLevel> out)
       throws UnsupportedPriceException, InvalidLevelException {
     if (side == null) {
       throw new InvalidLevelException("Book side is missing");
@@ -317,9 +322,11 @@ public final class DeltaOrderBook {
         // unrepresentable price on an absent level does not fail the seed.
         continue;
       }
-      final int price;
+      final long price;
+      final int bucket;
       try {
         price = instrument.toDepthPriceUnits(level.price());
+        bucket = bucketer.bucket(bid, price);
       } catch (ValueConversionException failure) {
         if (failure.reason() == ValueConversionException.Reason.DEPTH_PRICE_OUT_OF_RANGE) {
           throw new UnsupportedPriceException("Price cannot be represented as depth units");
@@ -335,7 +342,22 @@ public final class DeltaOrderBook {
       if (size == 0 && !keepZeroSizes) {
         continue;
       }
-      out.add(new DepthUpdate(bid, price, size));
+      out.add(new NativeLevel(bid, price, size, bucket));
+    }
+  }
+
+  /** One validated level on the native grid, with the bucket it maps onto. */
+  private static final class NativeLevel {
+    private final boolean bid;
+    private final long price;
+    private final int size;
+    private final int bucket;
+
+    private NativeLevel(boolean bid, long price, int size, int bucket) {
+      this.bid = bid;
+      this.price = price;
+      this.size = size;
+      this.bucket = bucket;
     }
   }
 

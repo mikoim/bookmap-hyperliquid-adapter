@@ -55,8 +55,8 @@ public final class OrderBookSnapshotDiff {
     }
 
     try {
-      SortedMap<Integer, BigDecimal> normalizedBids = normalize(snapshot.bids());
-      SortedMap<Integer, BigDecimal> normalizedAsks = normalize(snapshot.asks());
+      SortedMap<Long, BigDecimal> normalizedBids = normalize(snapshot.bids(), true);
+      SortedMap<Long, BigDecimal> normalizedAsks = normalize(snapshot.asks(), false);
       return new SnapshotValidation(
           SnapshotValidation.Status.VALID,
           new NormalizedBookSnapshot(snapshot.time(), normalizedBids, normalizedAsks),
@@ -91,14 +91,23 @@ public final class OrderBookSnapshotDiff {
 
   /** Sums native levels into buckets of the selected tick; bids floor, asks ceil. */
   private SortedMap<Integer, BigDecimal> bucketize(
-      SortedMap<Integer, BigDecimal> nativeLevels, boolean bid) {
+      SortedMap<Long, BigDecimal> nativeLevels, boolean bid) {
     SortedMap<Integer, BigDecimal> buckets = new TreeMap<Integer, BigDecimal>();
-    for (Map.Entry<Integer, BigDecimal> level : nativeLevels.entrySet()) {
-      Integer bucket = Integer.valueOf(bucketer.bucket(bid, level.getKey().intValue()));
+    for (Map.Entry<Long, BigDecimal> level : nativeLevels.entrySet()) {
+      Integer bucket = Integer.valueOf(bucketOfValidated(bid, level.getKey().longValue()));
       BigDecimal total = buckets.get(bucket);
       buckets.put(bucket, total == null ? level.getValue() : total.add(level.getValue()));
     }
     return buckets;
+  }
+
+  /** Every normalized price was bucketed once during validation, so this cannot fail. */
+  private int bucketOfValidated(boolean bid, long nativeUnits) {
+    try {
+      return bucketer.bucket(bid, nativeUnits);
+    } catch (ValueConversionException impossible) {
+      throw new IllegalStateException("normalized price cannot be bucketed", impossible);
+    }
   }
 
   /** Deletes every saved level and empties the baseline. */
@@ -117,13 +126,13 @@ public final class OrderBookSnapshotDiff {
     asks = new TreeMap<Integer, BigDecimal>();
   }
 
-  private SortedMap<Integer, BigDecimal> normalize(List<BookLevel> levels)
+  private SortedMap<Long, BigDecimal> normalize(List<BookLevel> levels, boolean bid)
       throws InvalidSnapshotException, UnsupportedPriceException {
     if (levels == null) {
       throw new InvalidSnapshotException("Book side is missing");
     }
 
-    SortedMap<Integer, BigDecimal> normalized = new TreeMap<Integer, BigDecimal>();
+    SortedMap<Long, BigDecimal> normalized = new TreeMap<Long, BigDecimal>();
     for (BookLevel level : levels) {
       if (level == null) {
         throw new InvalidSnapshotException("Book level is missing");
@@ -132,9 +141,10 @@ public final class OrderBookSnapshotDiff {
         // A zero-size level in a complete snapshot is simply absent.
         continue;
       }
-      final int price;
+      final long price;
       try {
         price = instrument.toDepthPriceUnits(level.price());
+        bucketer.bucket(bid, price);
       } catch (ValueConversionException exception) {
         if (exception.reason() == ValueConversionException.Reason.DEPTH_PRICE_OUT_OF_RANGE) {
           throw new UnsupportedPriceException("Price cannot be represented as depth units");
@@ -146,10 +156,10 @@ public final class OrderBookSnapshotDiff {
       } catch (ValueConversionException exception) {
         throw new InvalidSnapshotException("Size is invalid");
       }
-      if (normalized.containsKey(Integer.valueOf(price))) {
+      if (normalized.containsKey(Long.valueOf(price))) {
         throw new InvalidSnapshotException("Duplicate normalized price");
       }
-      normalized.put(Integer.valueOf(price), level.size());
+      normalized.put(Long.valueOf(price), level.size());
     }
     return normalized;
   }
@@ -256,16 +266,16 @@ public final class OrderBookSnapshotDiff {
     }
   }
 
-  /** Immutable snapshot whose prices are normalized to Bookmap depth units. */
+  /** Immutable snapshot whose prices are normalized to native long depth units. */
   public static final class NormalizedBookSnapshot {
 
     private final long time;
-    private final SortedMap<Integer, BigDecimal> bids;
-    private final SortedMap<Integer, BigDecimal> asks;
+    private final SortedMap<Long, BigDecimal> bids;
+    private final SortedMap<Long, BigDecimal> asks;
 
     /** Creates an immutable normalized snapshot from defensive copies of both sides. */
     public NormalizedBookSnapshot(
-        long time, SortedMap<Integer, BigDecimal> bids, SortedMap<Integer, BigDecimal> asks) {
+        long time, SortedMap<Long, BigDecimal> bids, SortedMap<Long, BigDecimal> asks) {
       this.time = time;
       this.bids = immutableCopy(bids, "bids");
       this.asks = immutableCopy(asks, "asks");
@@ -277,19 +287,19 @@ public final class OrderBookSnapshotDiff {
     }
 
     /** Returns normalized bid prices and their original exact sizes in ascending price order. */
-    public SortedMap<Integer, BigDecimal> bids() {
+    public SortedMap<Long, BigDecimal> bids() {
       return immutableCopy(bids, "bids");
     }
 
     /** Returns normalized ask prices and their original exact sizes in ascending price order. */
-    public SortedMap<Integer, BigDecimal> asks() {
+    public SortedMap<Long, BigDecimal> asks() {
       return immutableCopy(asks, "asks");
     }
 
-    private static SortedMap<Integer, BigDecimal> immutableCopy(
-        SortedMap<Integer, BigDecimal> levels, String name) {
+    private static SortedMap<Long, BigDecimal> immutableCopy(
+        SortedMap<Long, BigDecimal> levels, String name) {
       return Collections.unmodifiableSortedMap(
-          new TreeMap<Integer, BigDecimal>(Objects.requireNonNull(levels, name)));
+          new TreeMap<Long, BigDecimal>(Objects.requireNonNull(levels, name)));
     }
   }
 }

@@ -140,7 +140,7 @@ public class OrderBookSnapshotDiffTest {
   public void preservesLargeValidSizesUntilApplySaturatesThem() {
     NormalizedBookSnapshot snapshot = valid(snapshot(10, bids(level("100", "2147483648")), asks()));
 
-    assertEquals(new BigDecimal("2147483648"), snapshot.bids().get(Integer.valueOf(100000000)));
+    assertEquals(new BigDecimal("2147483648"), snapshot.bids().get(Long.valueOf(100000000L)));
     assertEquals(
         Collections.singletonList(depth(true, 100000000, Integer.MAX_VALUE)),
         diff.apply(snapshot, false));
@@ -259,6 +259,23 @@ public class OrderBookSnapshotDiffTest {
             false);
 
     assertEquals(Arrays.asList(depth(true, 8778, Integer.MAX_VALUE)), updates);
+  }
+
+  /** A spot pair whose native units exceed int diffs correctly at its default tick. */
+  @Test
+  public void highPricedSpotSnapshotDiffsInIntBuckets() {
+    Instrument gold = Instrument.spot("XAUT0/USDC", "@182", 2);
+    OrderBookSnapshotDiff goldDiff =
+        new OrderBookSnapshotDiff(gold, new PriceBucketer(gold, new BigDecimal("0.1")));
+
+    SnapshotValidation validation =
+        goldDiff.validate(
+            snapshot(1, bids(level("4378.7", "0.5")), asks(level("4378.8", "0.25"))), 0);
+
+    assertEquals(SnapshotValidation.Status.VALID, validation.status());
+    assertEquals(
+        Arrays.asList(depth(true, 43787, 50), depth(false, 43788, 25)),
+        goldDiff.apply(validation.snapshot(), false));
   }
 
   private void assertInvalidSize(String size) {

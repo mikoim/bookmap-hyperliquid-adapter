@@ -196,6 +196,21 @@ public class DeltaOrderBookTest {
         coarse.replacePublished());
   }
 
+  /** A spot pair whose native units exceed int is published as int buckets at its default tick. */
+  @Test
+  public void highPricedSpotSeedPublishesIntBucketsFromLongNativeUnits() {
+    Instrument gold = Instrument.spot("XAUT0/USDC", "@182", 2);
+    DeltaOrderBook book = new DeltaOrderBook(gold, new PriceBucketer(gold, new BigDecimal("0.1")));
+
+    book.applySeed(snapshot(1L, levels(level("4378.7", "0.5")), levels(level("4378.8", "0.25"))));
+    List<DepthUpdate> published = book.publishStaged();
+    DeltaOrderBook.Result delta =
+        book.applyDelta(snapshot(2L, levels(level("4378.65", "1")), levels()), true);
+
+    assertEquals(Arrays.asList(depth(true, 43787, 50), depth(false, 43788, 25)), published);
+    assertEquals(Collections.singletonList(depth(true, 43786, 100)), delta.updates());
+  }
+
   @Test
   public void coarseTickBucketTotalsSaturate() {
     Instrument hype = Instrument.perpetual("HYPE", 2);

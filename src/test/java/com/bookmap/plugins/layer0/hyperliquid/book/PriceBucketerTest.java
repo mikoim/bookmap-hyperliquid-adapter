@@ -2,7 +2,6 @@ package com.bookmap.plugins.layer0.hyperliquid.book;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.bookmap.plugins.layer0.hyperliquid.model.Instrument;
@@ -16,18 +15,18 @@ public class PriceBucketerTest {
   private final Instrument hype = Instrument.perpetual("HYPE", 2);
 
   @Test
-  public void identityMapsEveryNativeUnitOntoItself() {
+  public void identityMapsEveryNativeUnitOntoItself() throws Exception {
     PriceBucketer bucketer = PriceBucketer.identity(hype);
 
     assertEquals(1L, bucketer.ratio());
     assertEquals(0, new BigDecimal("0.0001").compareTo(bucketer.tick()));
     assertEquals(877840, bucketer.bidBucket(877840));
     assertEquals(877850, bucketer.askBucket(877850));
-    assertArrayEquals(new int[] {877840, 877840}, bucketer.nativeRange(877840, true));
+    assertArrayEquals(new long[] {877840L, 877840L}, bucketer.nativeRange(877840, true));
   }
 
   @Test
-  public void bidsRoundDownAndAsksRoundUpToTheTick() {
+  public void bidsRoundDownAndAsksRoundUpToTheTick() throws Exception {
     PriceBucketer bucketer = new PriceBucketer(hype, new BigDecimal("0.01"));
 
     assertEquals(100L, bucketer.ratio());
@@ -37,20 +36,41 @@ public class PriceBucketerTest {
     assertEquals(8778, bucketer.askBucket(877800));
     assertEquals(8778, bucketer.bucket(true, 877840));
     assertEquals(8779, bucketer.bucket(false, 877850));
-    assertArrayEquals(new int[] {877800, 877899}, bucketer.nativeRange(8778, true));
-    assertArrayEquals(new int[] {877801, 877900}, bucketer.nativeRange(8779, false));
+    assertArrayEquals(new long[] {877800L, 877899L}, bucketer.nativeRange(8778, true));
+    assertArrayEquals(new long[] {877801L, 877900L}, bucketer.nativeRange(8779, false));
   }
 
+  /** XAUT0/USDC: 4378.7 on the 1e-6 grid is 4.4e9 native units; the 0.1 tick maps it to 43787. */
   @Test
-  public void extremeNativeUnitsDoNotOverflow() {
-    PriceBucketer bucketer = new PriceBucketer(hype, new BigDecimal("0.001"));
+  public void highPricedSpotPairBucketsWithinIntAtTheDefaultTick() throws Exception {
+    Instrument gold = Instrument.spot("XAUT0/USDC", "@182", 2);
+    PriceBucketer bucketer = new PriceBucketer(gold, new BigDecimal("0.1"));
 
-    assertEquals(Integer.MAX_VALUE / 10 + 1, bucketer.askBucket(Integer.MAX_VALUE));
-    int[] range = bucketer.nativeRange(Integer.MAX_VALUE / 10 + 1, false);
-    assertTrue(range[0] <= Integer.MAX_VALUE && range[1] == Integer.MAX_VALUE);
-    assertEquals(Integer.MAX_VALUE, PriceBucketer.saturate(4294967294L));
-    assertEquals(0, PriceBucketer.saturate(-1L));
-    assertEquals(7, PriceBucketer.saturate(7L));
+    assertEquals(100_000L, bucketer.ratio());
+    assertEquals(43787, bucketer.bidBucket(4_378_700_000L));
+    assertEquals(43787, bucketer.askBucket(4_378_700_000L));
+    assertEquals(43788, bucketer.askBucket(4_378_700_001L));
+    assertArrayEquals(
+        new long[] {4_378_700_000L, 4_378_799_999L}, bucketer.nativeRange(43787, true));
+    assertArrayEquals(
+        new long[] {4_378_600_001L, 4_378_700_000L}, bucketer.nativeRange(43787, false));
+  }
+
+  /** Only a bucket beyond int is unsupported; the native units themselves may exceed int. */
+  @Test
+  public void bucketBeyondIntIsReportedAsOutOfRange() throws Exception {
+    Instrument gold = Instrument.spot("XAUT0/USDC", "@182", 2);
+    PriceBucketer identity = PriceBucketer.identity(gold);
+
+    assertEquals(Integer.MAX_VALUE, identity.askBucket((long) Integer.MAX_VALUE));
+    try {
+      identity.bidBucket(4_378_700_000L);
+      fail("bucket beyond int must be rejected");
+    } catch (ValueConversionException expected) {
+      assertEquals(ValueConversionException.Reason.DEPTH_PRICE_OUT_OF_RANGE, expected.reason());
+    }
+    PriceBucketer coarse = new PriceBucketer(gold, new BigDecimal("0.001"));
+    assertEquals(Integer.MAX_VALUE, coarse.askBucket(Integer.MAX_VALUE * 1000L));
   }
 
   @Test
