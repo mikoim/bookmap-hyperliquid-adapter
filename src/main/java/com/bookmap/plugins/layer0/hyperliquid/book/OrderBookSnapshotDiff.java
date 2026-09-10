@@ -144,6 +144,8 @@ public final class OrderBookSnapshotDiff {
       final long price;
       try {
         price = instrument.toDepthPriceUnits(level.price());
+        // Result discarded: this call only validates that the bucket fits an int; the actual
+        // bucket value is recomputed by bucketize().
         bucketer.bucket(bid, price);
       } catch (ValueConversionException exception) {
         if (exception.reason() == ValueConversionException.Reason.DEPTH_PRICE_OUT_OF_RANGE) {

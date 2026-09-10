@@ -94,7 +94,7 @@ public final class HyperliquidProcessBudget {
   }
 
   /**
-   * Reserves the two subscription slots required for one perpetual alias's book and trades feeds.
+   * Reserves the two subscription slots required for one instrument alias's book and trades feeds.
    *
    * @param nowMillis caller-supplied current time in milliseconds
    * @return an acquired two-slot subscription permit or a nonblocking retry decision
@@ -316,7 +316,7 @@ public final class HyperliquidProcessBudget {
     }
   }
 
-  /** A two-slot perpetual subscription reservation. */
+  /** A two-slot instrument subscription reservation. */
   public static final class SubscriptionPermit implements AutoCloseable {
 
     private final HyperliquidProcessBudget budget;

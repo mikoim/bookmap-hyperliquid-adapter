@@ -50,7 +50,7 @@ public final class HyperliquidConnector implements AutoCloseable {
   /** Receives lifecycle events emitted by the connector. */
   public interface Listener {
 
-    /** Reports validated perpetual metadata. */
+    /** Reports validated instrument metadata for both perpetual and spot markets. */
     void onMetadata(List<Instrument> instruments);
 
     /** Reports an unrecoverable initial-login failure. */

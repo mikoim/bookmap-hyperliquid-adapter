@@ -2,7 +2,7 @@ package com.bookmap.plugins.layer0.hyperliquid.model;
 
 import java.math.BigDecimal;
 
-/** One parsed Hyperliquid perpetual trade. */
+/** One parsed Hyperliquid trade for a perpetual or spot instrument. */
 public final class TradeEvent implements MarketDataEvent {
 
   private final String coin;

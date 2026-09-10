@@ -8,7 +8,7 @@ import java.util.List;
 /** Receives validated Hyperliquid session lifecycle and market-data output. */
 public interface SessionSink {
 
-  /** Reports the complete available perpetual-instrument list. */
+  /** Reports the complete available instrument list, covering both perpetual and spot markets. */
   void onKnownInstruments(List<Instrument> instruments);
 
   /**

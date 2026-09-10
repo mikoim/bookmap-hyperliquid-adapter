@@ -92,7 +92,7 @@ public final class TickSizePlan {
       throw new IllegalArgumentException("tick must be a multiple of the native price grid");
     }
     if (steps.bitLength() > 31) {
-      throw new IllegalArgumentException("tick is too coarse for int depth units");
+      throw new IllegalArgumentException("tick is too coarse for int depth buckets");
     }
     return steps.longValue();
   }

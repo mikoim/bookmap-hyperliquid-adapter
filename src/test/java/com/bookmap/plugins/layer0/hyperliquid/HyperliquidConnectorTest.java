@@ -190,9 +190,12 @@ public class HyperliquidConnectorTest {
     assertTrue(fixture.transport.httpCancelled());
   }
 
-  /** A symbol that both lists claim is a protocol failure rather than a silent overwrite. */
+  /**
+   * A perp symbol that collides with a spot coin (not the spot pair's own symbol) is a protocol
+   * failure rather than a silent overwrite.
+   */
   @Test
-  public void collidingPerpAndSpotSymbolsFailLogin() {
+  public void collidingPerpSymbolAndSpotCoinFailLogin() {
     Fixture fixture = new Fixture();
 
     fixture.connector.start(

@@ -20,7 +20,7 @@ final class AssetContextStore {
     for (Map.Entry<String, BigDecimal> entry : snapshot.entrySet()) {
       if (entry.getValue() == null) {
         throw new IllegalArgumentException(
-            "mark price for symbol '" + entry.getKey() + "' cannot be null");
+            "mark price for coin '" + entry.getKey() + "' cannot be null");
       }
     }
     markPrices.clear();
@@ -32,7 +32,7 @@ final class AssetContextStore {
     for (Map.Entry<String, BigDecimal> entry : delta.entrySet()) {
       if (entry.getValue() == null) {
         throw new IllegalArgumentException(
-            "mark price for symbol '" + entry.getKey() + "' cannot be null");
+            "mark price for coin '" + entry.getKey() + "' cannot be null");
       }
     }
     Set<String> changed = new HashSet<String>();
@@ -46,7 +46,7 @@ final class AssetContextStore {
   }
 
   /** Returns the current mark price, or null when the coin has never been reported. */
-  BigDecimal markPrice(String symbol) {
-    return markPrices.get(symbol);
+  BigDecimal markPrice(String coin) {
+    return markPrices.get(coin);
   }
 }
