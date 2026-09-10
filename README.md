@@ -1,9 +1,9 @@
 # Bookmap Hyperliquid Adapter
 
-Read-only Bookmap Layer 0 market data for Hyperliquid perpetuals, including HIP-3
-builder-deployed markets. Every live perpetual on every perp dex is listed and available to
-subscribe to; the adapter publishes aggregate L2 order books and trades for the instruments you
-subscribe to. It never requests credentials and never sends orders.
+Read-only Bookmap Layer 0 market data for Hyperliquid perpetuals and spot pairs, including HIP-3
+builder-deployed markets. Every live perpetual on every perp dex and every spot pair is listed and
+available to subscribe to; the adapter publishes aggregate L2 order books and trades for the
+instruments you subscribe to. It never requests credentials and never sends orders.
 
 ![Bookmap heatmap for the ETH/USDC perpetual delivered by the adapter](docs/eth.webp)
 
@@ -46,6 +46,11 @@ of levels, because the exchange aggregates before it sends.
 
 HIP-3 markets keep their fully qualified `dex:coin` names, for example `xyz:CL`.
 
+Spot pairs are listed as `BASE/QUOTE` under the `SPOT` type, for example `HYPE/USDC` or
+`XAUT0/USDT0`. Names are the HyperCore token names, so the pair the Hyperliquid app shows as
+`BTC/USDC` appears here as `UBTC/USDC`. On the wire the adapter subscribes by the exchange's own
+pair id (`@107` for HYPE/USDC); that id never appears in Bookmap.
+
 ## Order book sources
 
 | | Hyperliquid | Borsa | Hyperdash |
@@ -61,10 +66,10 @@ Hyperliquid itself.
 ## Scope
 
 Supported: `PERPETUAL` subscriptions for every live perpetual on every perp dex, HIP-3 markets
-included.
+included, and `SPOT` subscriptions for every spot pair.
 
-Not supported: spot markets, historical data, account data, credentials, order entry, and gap
-filling. Order APIs fail closed with a read-only system message.
+Not supported: historical data, account data, credentials, order entry, and gap filling. Order
+APIs fail closed with a read-only system message.
 
 ## Data-health messages
 
@@ -95,8 +100,12 @@ Mark prices always come from Hyperliquid, whatever the selected order book sourc
   caps a single JVM at five relay-backed providers.
 - During a disconnect the adapter reconnects and resynchronizes, but there is no historical gap fill
   and trades can be missed.
-- On Testnet the instrument list holds roughly 630 symbols across about 200 perp dexes, most of them
-  throwaway markets deployed by other developers.
+- On Testnet the instrument list holds roughly 630 perpetuals across about 200 perp dexes and
+  roughly 1,300 spot pairs, most of them throwaway markets deployed by other developers.
+- An instrument whose mark price has not arrived yet lists its full-precision grid as the default
+  tick. For a high-priced spot pair that grid can exceed Bookmap's integer price range, and the
+  subscription fails with an unsupported-price message until a mark price arrives; resubscribe
+  then.
 
 ## For developers
 

@@ -44,7 +44,7 @@ documentation is in the Javadoc; this table is only a map of where to start read
 | `hyperliquid.book` | Holding and publishing the book: folding seeds and deltas, aggregating onto the subscription's tick |
 | `hyperliquid.budget` | Process-wide reservations for connection, send, and subscription limits |
 | `hyperliquid.concurrent` | Serializing state work and bounding market-data frames |
-| `hyperliquid.model` | Immutable value and domain types |
+| `hyperliquid.model` | Immutable value and domain types, including the perpetual/spot `Instrument` |
 | `hyperliquid.parse` | Turning WebSocket and REST JSON into domain types |
 | `hyperliquid.session` | Bridging to Bookmap session output: subscription state, data-health monitoring, and the extra mark-price connection a relay source needs |
 | `hyperliquid.trade` | Duplicate suppression for trade notifications |

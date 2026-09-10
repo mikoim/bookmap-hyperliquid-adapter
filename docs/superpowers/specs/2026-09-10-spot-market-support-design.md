@@ -1,7 +1,7 @@
 # スポット市場サポート — 設計書
 
 - 作成日: 2026-09-10
-- 状態: 人間の設計承認済み、spec-review 待ち
+- 状態: spec-review READY、人間の承認済み、実装済み
 - 起点: ローカル main `f27aa0a`(1.3.0 リリース)
 - 対象: bookmap-hyperliquid-adapter(Bookmap Layer 0 マーケットデータアダプター)
 
