@@ -161,6 +161,14 @@ Bookmap API 側に type 定数はなく自由文字列である(api-core 7.8.0.1
   `index` に解決できること。`name`(coin)の重複、表示名 `baseName/quoteName` の重複は拒否
 - `isDelisted` は存在しないため扱わない。`isCanonical` は使わない
 
+`Instrument` への導出(`universe[]` の 1 要素につき 1 件、順序は `universe[]` のまま):
+
+- `symbol` = `tokens[tokens[0]].name + "/" + tokens[tokens[1]].name`(base はインデックス 0、quote は 1)
+- `coin` = `universe[].name`
+- `market` = `Market.SPOT`
+- `sizeDecimals` = base トークンの `szDecimals`(quote トークンの `szDecimals` は使わない)
+- `referencePrice` = null(ログイン後に `fastAssetCtxs` から補う)
+
 既存の `parseAllPerpMetas` は不変(生成する型が `Instrument`/`Market.PERPETUAL` になるだけ)。
 
 #### コネクタのログイン手順
@@ -188,6 +196,8 @@ Bookmap API 側に type 定数はなく自由文字列である(api-core 7.8.0.1
   メタデータ未着、解決不能、重複購読、予算不足の扱いは現行どおり
 - `SubscriptionRecord` の `l2BookKey` / `tradesKey` は `instrument.coin()` から作る。
   `alias()` は `instrument.symbol()`
+- `handleUnsubscribe(alias)` は現行どおり `records` を走査して alias(または要求名)で record を
+  見つけ、削除は `records` のキーである `instrument.coin()` で行う
 - `onAssetContexts`: 参照価格の取得を `assetContexts.markPrice(instrument.coin())` にする。
   `shouldRepublish` の「一覧にある銘柄が動いたか」判定も `coin` で行う。スナップショット/差分/
   間引きの規則は不変
