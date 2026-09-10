@@ -43,7 +43,10 @@ public class HyperliquidConnectorTest {
 
     assertEquals(URI.create("https://api.hyperliquid.xyz/info"), fixture.transport.httpUri());
     assertEquals("application/json", fixture.transport.contentType());
-    assertEquals("{\"type\":\"allPerpMetas\"}", fixture.transport.httpBody());
+    assertEquals(
+        Arrays.asList("{\"type\":\"allPerpMetas\"}", "{\"type\":\"spotMeta\"}"),
+        fixture.transport.httpBodies());
+    assertEquals(2, fixture.transport.pendingHttpCount());
     assertEquals(10_000L, fixture.transport.httpTimeoutMillis());
     assertTrue(fixture.transport.connectCalls().isEmpty());
   }
@@ -99,6 +102,108 @@ public class HyperliquidConnectorTest {
     fixture.transport.completeMeta(200, "{}");
 
     assertEquals(1, fixture.listener.initialFailures.size());
+    assertEquals(TransportFailure.Kind.PROTOCOL, fixture.listener.initialFailures.get(0).kind());
+    assertTrue(fixture.transport.connectCalls().isEmpty());
+  }
+
+  /** Login waits for both metadata responses and hands the listener one combined list. */
+  @Test
+  public void spotMetadataJoinsPerpMetadataBeforeConnecting() {
+    Fixture fixture = new Fixture();
+
+    fixture.connector.start(
+        SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
+    fixture.transport.completeSpotMeta(200, TestMetadata.spotMetaWithUsdcPairs("HYPE"));
+    assertTrue(fixture.listener.instrumentNames.isEmpty());
+    assertTrue(fixture.transport.connectCalls().isEmpty());
+
+    fixture.transport.completeMeta(200, validMeta("BTC"));
+
+    assertEquals(Arrays.asList("BTC", "HYPE/USDC"), fixture.listener.instrumentNames);
+    assertEquals(1, fixture.transport.connectCalls().size());
+    fixture.connector.close();
+  }
+
+  /** The response order does not matter: perp first, then spot, also logs in exactly once. */
+  @Test
+  public void perpMetadataMayArriveBeforeSpotMetadata() {
+    Fixture fixture = new Fixture();
+
+    fixture.connector.start(
+        SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
+    fixture.transport.requirePerpThenSpot();
+    fixture.transport.completeMetaOnly(200, validMeta("BTC"));
+    assertTrue(fixture.listener.instrumentNames.isEmpty());
+    fixture.transport.completeSpotMeta(200, TestMetadata.spotMetaWithUsdcPairs("HYPE"));
+
+    assertEquals(Arrays.asList("BTC", "HYPE/USDC"), fixture.listener.instrumentNames);
+    assertEquals(1, fixture.transport.connectCalls().size());
+    fixture.connector.close();
+  }
+
+  /** A failed spotMeta fails login, cancels the perp request, and never connects. */
+  @Test
+  public void failedSpotMetadataFailsLoginAndCancelsThePerpRequest() {
+    Fixture fixture = new Fixture();
+
+    fixture.connector.start(
+        SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
+    fixture.transport.completeSpotMeta(503, "unavailable");
+
+    assertEquals(1, fixture.listener.initialFailures.size());
+    assertEquals(TransportFailure.Kind.REMOTE, fixture.listener.initialFailures.get(0).kind());
+    assertTrue(fixture.transport.httpCancelled());
+    assertEquals(0, fixture.transport.pendingHttpCount());
+    assertTrue(fixture.transport.connectCalls().isEmpty());
+  }
+
+  /** Invalid spot JSON is a protocol failure, and a network failure is classified as such. */
+  @Test
+  public void invalidOrUnreachableSpotMetadataDoesNotConnect() {
+    Fixture invalid = new Fixture();
+    invalid.connector.start(
+        SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
+    invalid.transport.completeSpotMeta(200, "[]");
+    assertEquals(TransportFailure.Kind.PROTOCOL, invalid.listener.initialFailures.get(0).kind());
+    assertTrue(invalid.transport.connectCalls().isEmpty());
+
+    Fixture unreachable = new Fixture();
+    unreachable.connector.start(
+        SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
+    unreachable.transport.failSpotMeta(new IllegalStateException("spot unavailable"));
+    assertEquals(TransportFailure.Kind.NETWORK, unreachable.listener.initialFailures.get(0).kind());
+    assertEquals(1, unreachable.listener.initialFailures.size());
+    assertTrue(unreachable.transport.connectCalls().isEmpty());
+  }
+
+  /** A failed perp request also cancels the pending spot request. */
+  @Test
+  public void failedPerpMetadataCancelsThePendingSpotRequest() {
+    Fixture fixture = new Fixture();
+
+    fixture.connector.start(
+        SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
+    fixture.transport.failMeta(new IllegalStateException("perp unavailable"));
+
+    assertEquals(1, fixture.listener.initialFailures.size());
+    assertEquals(0, fixture.transport.pendingHttpCount());
+    assertTrue(fixture.transport.httpCancelled());
+  }
+
+  /** A symbol that both lists claim is a protocol failure rather than a silent overwrite. */
+  @Test
+  public void collidingPerpAndSpotSymbolsFailLogin() {
+    Fixture fixture = new Fixture();
+
+    fixture.connector.start(
+        SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
+    fixture.transport.completeSpotMeta(
+        200,
+        TestMetadata.spotMeta(
+            TestMetadata.spotToken(0, "USDC", 8) + "," + TestMetadata.spotToken(1, "X", 2),
+            TestMetadata.spotPair("BTC", 1, 0)));
+    fixture.transport.completeMeta(200, validMeta("BTC"));
+
     assertEquals(TransportFailure.Kind.PROTOCOL, fixture.listener.initialFailures.get(0).kind());
     assertTrue(fixture.transport.connectCalls().isEmpty());
   }
@@ -170,9 +275,10 @@ public class HyperliquidConnectorTest {
     fixture.connector.start(
         SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
     fixture.connector.close();
-    fixture.transport.completeMeta(200, validMeta("BTC"));
+    fixture.transport.lateCompleteMeta(200, validMeta("BTC"));
 
     assertTrue(fixture.transport.httpCancelled());
+    assertEquals(0, fixture.transport.pendingHttpCount());
     assertTrue(fixture.transport.connectCalls().isEmpty());
     assertTrue(fixture.listener.instrumentNames.isEmpty());
   }

@@ -722,7 +722,8 @@ public class HyperliquidSessionLifecycleTest {
     fixture.startLogin();
     fixture.session.close();
     fixture.drain();
-    fixture.transport.completeMeta(200, TestMetadata.allPerpMetas(TestMetadata.universe("BTC")));
+    fixture.transport.lateCompleteMeta(
+        200, TestMetadata.allPerpMetas(TestMetadata.universe("BTC")));
     fixture.drain();
 
     assertTrue(fixture.sink.events().isEmpty());

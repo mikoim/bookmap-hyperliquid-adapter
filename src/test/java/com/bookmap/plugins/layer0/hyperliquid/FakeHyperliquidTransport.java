@@ -13,11 +13,8 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
   private int startCount;
   private URI httpUri;
   private String contentType;
-  private String httpBody;
   private long httpTimeoutMillis;
-  private HttpCallback httpCallback;
-  private final List<HttpCallback> httpCallbacks = new ArrayList<HttpCallback>();
-  private final List<TrackedHandle> httpHandles = new ArrayList<TrackedHandle>();
+  private final List<HttpRequest> httpRequests = new ArrayList<HttpRequest>();
   private final List<URI> connectCalls = new ArrayList<URI>();
   private final List<Map<String, String>> connectHeaders = new ArrayList<Map<String, String>>();
   private long connectTimeoutMillis;
@@ -44,12 +41,9 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
       URI uri, String requestContentType, String body, long timeoutMillis, HttpCallback callback) {
     httpUri = uri;
     contentType = requestContentType;
-    httpBody = body;
     httpTimeoutMillis = timeoutMillis;
-    httpCallback = callback;
-    httpCallbacks.add(callback);
     TrackedHandle handle = new TrackedHandle(true);
-    httpHandles.add(handle);
+    httpRequests.add(new HttpRequest(body, callback, handle));
     return handle;
   }
 
@@ -89,8 +83,29 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
     return contentType;
   }
 
+  /** Returns the body of the first HTTP request, which is always the allPerpMetas request. */
   public String httpBody() {
-    return httpBody;
+    return httpRequests.isEmpty() ? null : httpRequests.get(0).body;
+  }
+
+  /** Returns every HTTP request body in the order posted. */
+  public List<String> httpBodies() {
+    List<String> bodies = new ArrayList<String>();
+    for (HttpRequest request : httpRequests) {
+      bodies.add(request.body);
+    }
+    return bodies;
+  }
+
+  /** Returns how many HTTP requests are neither completed nor cancelled. */
+  public int pendingHttpCount() {
+    int pending = 0;
+    for (HttpRequest request : httpRequests) {
+      if (!request.handle.completed && !request.handle.cancelled) {
+        pending++;
+      }
+    }
+    return pending;
   }
 
   public long httpTimeoutMillis() {
@@ -122,8 +137,8 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
   }
 
   public boolean allHttpHandlesSettled() {
-    for (TrackedHandle handle : httpHandles) {
-      if (!handle.cancelled && !handle.completed) {
+    for (HttpRequest request : httpRequests) {
+      if (!request.handle.cancelled && !request.handle.completed) {
         return false;
       }
     }
@@ -131,13 +146,13 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
   }
 
   public int httpHandleCount() {
-    return httpHandles.size();
+    return httpRequests.size();
   }
 
   public int settledHttpHandleCount() {
     int settled = 0;
-    for (TrackedHandle handle : httpHandles) {
-      if (handle.cancelled || handle.completed) {
+    for (HttpRequest request : httpRequests) {
+      if (request.handle.cancelled || request.handle.completed) {
         settled++;
       }
     }
@@ -171,20 +186,69 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
     socketCallbacks.get(connectionIndex).onText(text);
   }
 
+  public static final String PERP_META_REQUEST = "{\"type\":\"allPerpMetas\"}";
+  public static final String SPOT_META_REQUEST = "{\"type\":\"spotMeta\"}";
+
+  /**
+   * Completes the allPerpMetas request. A still-pending spotMeta request is completed first with an
+   * empty spot universe, so perp-only tests need no spot fixture.
+   */
   public void completeMeta(int status, String body) {
-    httpHandles.get(httpHandles.size() - 1).completed = true;
-    httpCallback.onComplete(status, body, null);
-  }
-
-  public void failMeta(Throwable failure) {
-    httpHandles.get(httpHandles.size() - 1).completed = true;
-    httpCallback.onComplete(0, null, failure);
-  }
-
-  public void lateCompleteMeta(int status, String body) {
-    for (HttpCallback callback : httpCallbacks) {
-      callback.onComplete(status, body, null);
+    HttpRequest spot = pending(SPOT_META_REQUEST);
+    if (spot != null) {
+      spot.complete(200, TestMetadata.emptySpotMeta(), null);
     }
+    requirePending(PERP_META_REQUEST).complete(status, body, null);
+  }
+
+  /** Completes the spotMeta request; call before {@link #completeMeta}. */
+  public void completeSpotMeta(int status, String body) {
+    requirePending(SPOT_META_REQUEST).complete(status, body, null);
+  }
+
+  /** Completes only the allPerpMetas request, leaving a pending spotMeta request untouched. */
+  public void completeMetaOnly(int status, String body) {
+    requirePending(PERP_META_REQUEST).complete(status, body, null);
+  }
+
+  /** Fails the allPerpMetas request. */
+  public void failMeta(Throwable failure) {
+    requirePending(PERP_META_REQUEST).complete(0, null, failure);
+  }
+
+  /** Fails the spotMeta request. */
+  public void failSpotMeta(Throwable failure) {
+    requirePending(SPOT_META_REQUEST).complete(0, null, failure);
+  }
+
+  /** Re-delivers a response to every HTTP callback ever posted, completed or cancelled. */
+  public void lateCompleteMeta(int status, String body) {
+    for (HttpRequest request : httpRequests) {
+      request.callback.onComplete(status, body, null);
+    }
+  }
+
+  /** Asserts both metadata requests are pending, so a test can drive their order explicitly. */
+  public void requirePerpThenSpot() {
+    requirePending(PERP_META_REQUEST);
+    requirePending(SPOT_META_REQUEST);
+  }
+
+  private HttpRequest pending(String body) {
+    for (HttpRequest request : httpRequests) {
+      if (request.body.equals(body) && !request.handle.completed && !request.handle.cancelled) {
+        return request;
+      }
+    }
+    return null;
+  }
+
+  private HttpRequest requirePending(String body) {
+    HttpRequest request = pending(body);
+    if (request == null) {
+      throw new AssertionError("no pending HTTP request with body " + body);
+    }
+    return request;
   }
 
   public void openSocket() {
@@ -324,6 +388,23 @@ public final class FakeHyperliquidTransport implements HyperliquidTransport {
         this.body = body;
         this.callback = callback;
       }
+    }
+  }
+
+  private static final class HttpRequest {
+    private final String body;
+    private final HttpCallback callback;
+    private final TrackedHandle handle;
+
+    private HttpRequest(String body, HttpCallback callback, TrackedHandle handle) {
+      this.body = body;
+      this.callback = callback;
+      this.handle = handle;
+    }
+
+    private void complete(int status, String responseBody, Throwable failure) {
+      handle.completed = true;
+      callback.onComplete(status, responseBody, failure);
     }
   }
 
