@@ -133,7 +133,7 @@ remain subject to Bookmap's own terms.
 - [ ] **Step 3: 差分が意図どおりであることを確認する**
 
 Run: `git diff --stat README.md && git diff README.md | grep '^+' | grep -v '^+++'`
-Expected: `README.md` のみ、追加行は空行 1 つと上記 4 行（見出し 1 行と本文 3 行）だけ。削除行なし。
+Expected: `README.md` のみ、追加行は上記ブロックの 6 行（区切りの空行、見出し、空行、本文 3 行）だけ。削除行なし。
 
 - [ ] **Step 4: リンク先が存在し、空白の問題がないことを確認する**
 
@@ -162,7 +162,7 @@ Claude-Session: https://claude.ai/code/session_01WwLrHW4nQQnuETUpK4MnvY"
 
 - [ ] **Step 1: 変更範囲が spec のとおりであることを確認する**
 
-Run: `git diff --name-only 3ae9984..HEAD`
+Run: `git diff --name-only HEAD~2..HEAD`（Task 1 と Task 2 の 2 コミット分）
 Expected: `LICENSE` と `README.md` の 2 ファイルのみ。
 
 - [ ] **Step 2: 作業ツリーがクリーンであることを確認する**
