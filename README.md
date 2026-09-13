@@ -111,3 +111,9 @@ Mark prices always come from Hyperliquid, whatever the selected order book sourc
 
 Build instructions, quality gates, and the code layout are in
 [docs/development.md](docs/development.md).
+
+## License
+
+This adapter is released under the MIT License; the full text is in [LICENSE](LICENSE). The
+license covers only the source in this repository. Bookmap itself and the Bookmap Layer 0 API
+remain subject to Bookmap's own terms.
