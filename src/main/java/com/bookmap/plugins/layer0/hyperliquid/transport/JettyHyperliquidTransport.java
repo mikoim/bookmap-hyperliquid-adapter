@@ -33,9 +33,20 @@ public final class JettyHyperliquidTransport implements HyperliquidTransport {
 
   /** Creates a transport with separately owned HTTP and WebSocket TLS clients. */
   public JettyHyperliquidTransport() {
-    httpClient = new HttpClient(new SslContextFactory());
-    webSocketClient = new WebSocketClient(new SslContextFactory());
+    httpClient = new HttpClient(verifyingSslContextFactory());
+    webSocketClient = new WebSocketClient(verifyingSslContextFactory());
     applyMessageLimits(webSocketClient.getPolicy());
+  }
+
+  /**
+   * Turns on host-name verification. Jetty 9.3 leaves the endpoint identification algorithm unset,
+   * so a default factory checks the certificate chain but accepts a certificate issued for any
+   * other host.
+   */
+  static SslContextFactory verifyingSslContextFactory() {
+    SslContextFactory factory = new SslContextFactory();
+    factory.setEndpointIdentificationAlgorithm("HTTPS");
+    return factory;
   }
 
   @Override

@@ -9,6 +9,8 @@ import static org.junit.Assert.assertTrue;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
 import java.util.concurrent.atomic.AtomicReference;
+import javax.net.ssl.SSLEngine;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.websocket.api.RemoteEndpoint;
 import org.eclipse.jetty.websocket.api.Session;
 import org.eclipse.jetty.websocket.api.WebSocketPolicy;
@@ -180,6 +182,20 @@ public class JettyHyperliquidTransportContractTest {
     assertEquals(1_048_576, policy.getMaxBinaryMessageSize());
     assertEquals(1_048_576, JettyHyperliquidTransport.MAX_WEB_SOCKET_MESSAGE_BYTES);
     assertEquals(4_194_304, JettyHyperliquidTransport.MAX_HTTP_RESPONSE_BYTES);
+  }
+
+  /** Jetty 9.3 leaves host-name verification off; an engine it builds must still ask for it. */
+  @Test
+  public void tlsEnginesVerifyTheServerHostName() throws Exception {
+    SslContextFactory factory = JettyHyperliquidTransport.verifyingSslContextFactory();
+    factory.start();
+    try {
+      SSLEngine engine = factory.newSSLEngine("api.hyperliquid.xyz", 443);
+
+      assertEquals("HTTPS", engine.getSSLParameters().getEndpointIdentificationAlgorithm());
+    } finally {
+      factory.stop();
+    }
   }
 
   private static Session session(
