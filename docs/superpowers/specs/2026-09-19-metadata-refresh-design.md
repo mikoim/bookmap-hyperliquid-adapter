@@ -176,8 +176,9 @@ final class MetadataRefresher {
 
 - コンストラクタに `MetadataRefresher.RequestFactory` を生成するための
   `MetadataRequestFactory`(`SourceProfile -> MetadataRequest.Callback -> MetadataRequest`)を
-  追加する。`AssetContextConnectorFactory` に倣い、session パッケージの public interface とする。`infoUri` はログイン時の `SourceProfile` で決まるため、`MetadataRefresher` は
-  `handleLogin` で `profile` が確定した時点で生成する
+  追加する。`AssetContextConnectorFactory` に倣い、session パッケージの public interface とする。
+  `infoUri` はログイン時の `SourceProfile` で決まるため、`MetadataRefresher` は `handleLogin` で
+  `profile` が確定した時点で生成する
 - `onSocketOpened`: 初回接続(`!connectedOnce` の分岐)で `refresher.start()`、再接続の分岐で
   `refresher.refreshNow()`
 - `MetadataRefresher.Listener` を実装する
