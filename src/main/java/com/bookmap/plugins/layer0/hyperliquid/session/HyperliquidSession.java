@@ -880,7 +880,8 @@ public final class HyperliquidSession
           trade.key(),
           record.bucketer().tradePriceUnits(trade.price()),
           record.instrument().toSizeUnits(trade.size()),
-          trade.isBuyAggressor());
+          trade.isBuyAggressor(),
+          trade.executionId());
     } catch (ValueConversionException failure) {
       sink.onDiagnostic("discarded invalid trade for " + record.alias());
       return null;

@@ -359,12 +359,15 @@ public final class SubscriptionRecord {
     private final double priceUnits;
     private final int sizeUnits;
     private final boolean buyAggressor;
+    private final String executionId;
 
-    PendingTrade(TradeKey key, double priceUnits, int sizeUnits, boolean buyAggressor) {
+    PendingTrade(
+        TradeKey key, double priceUnits, int sizeUnits, boolean buyAggressor, String executionId) {
       this.key = key;
       this.priceUnits = priceUnits;
       this.sizeUnits = sizeUnits;
       this.buyAggressor = buyAggressor;
+      this.executionId = executionId;
     }
 
     TradeKey key() {
@@ -381,6 +384,11 @@ public final class SubscriptionRecord {
 
     boolean buyAggressor() {
       return buyAggressor;
+    }
+
+    /** Returns the identifier shared by the fills of one execution, or null when there is none. */
+    String executionId() {
+      return executionId;
     }
   }
 }
