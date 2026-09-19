@@ -278,6 +278,34 @@ public class ProviderEndToEndTest {
     fixture.assertClosed();
   }
 
+  @Test
+  public void fillsOfOneTransactionReachBookmapAsOneExecution() {
+    Fixture fixture = new Fixture(budget(2, 20, 50, 2));
+    fixture.loginWithMetadata("BTC");
+    fixture.subscribe("BTC");
+    fixture.completeSends();
+    fixture.ack("BTC", "l2Book");
+    fixture.ack("BTC", "trades");
+    fixture.book("BTC", 1L, "100", "1", "101", "2");
+    fixture.drain();
+    String hash = "0xad8e0566e813bdf98176040e6d51bd011100efa789e89430cdf17964235f55d8";
+
+    fixture.transport.emitTextFromConnection(
+        fixture.marketDataConnection(),
+        "{\"channel\":\"trades\",\"data\":["
+            + "{\"coin\":\"BTC\",\"side\":\"B\",\"px\":\"101\",\"sz\":\"1\",\"time\":9,\"tid\":1,"
+            + "\"hash\":\""
+            + hash
+            + "\"},"
+            + "{\"coin\":\"BTC\",\"side\":\"B\",\"px\":\"102\",\"sz\":\"1\",\"time\":9,\"tid\":2,"
+            + "\"hash\":\""
+            + hash
+            + "\"}]}");
+    fixture.drain();
+
+    assertEquals("[TF, FT]", fixture.data.tradeFlags.toString());
+  }
+
   /** A spot pair lists as BASE/QUOTE, subscribes as @index, and prices from its own mark price. */
   @Test
   public void spotInstrumentFlowsEndToEnd() {
@@ -1204,6 +1232,7 @@ public class ProviderEndToEndTest {
     private final List<String> trace;
     private final List<String> depths = new ArrayList<String>();
     private final List<String> trades = new ArrayList<String>();
+    private final List<String> tradeFlags = new ArrayList<String>();
 
     private RecordingData(List<String> trace) {
       this.trace = trace;
@@ -1221,6 +1250,7 @@ public class ProviderEndToEndTest {
       String event = "trade:" + alias + ":" + (int) price;
       trades.add(event);
       trace.add(event);
+      tradeFlags.add((trade.isExecutionStart ? "T" : "F") + (trade.isExecutionEnd ? "T" : "F"));
     }
   }
 

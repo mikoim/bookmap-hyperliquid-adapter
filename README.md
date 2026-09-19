@@ -74,6 +74,14 @@ are subscribed to leaves the list, the adapter says so once in a system message 
 subscription open until you remove it; `BOOK_STALE` reports it if the exchange stops publishing. A
 failed refresh keeps the previous list and is only logged.
 
+Trades keep the grouping the exchange gives them. Hyperliquid reports one trade per resting order
+filled, so a single market order that sweeps five levels arrives as five trades sharing one
+transaction hash; the adapter delivers them to Bookmap as one execution. Fills are grouped only when
+they arrive together, carry the same hash and the same aggressor side. Two orders for the same
+instrument and side sent in one transaction cannot be told apart and form one execution. Fills
+without a transaction hash — the exchange sends an all-zero hash for some system-generated fills —
+are delivered one by one, as before.
+
 Not supported: historical data, account data, credentials, order entry, and gap filling. Order
 APIs fail closed with a read-only system message.
 
