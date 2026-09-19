@@ -326,8 +326,8 @@ public class TradeExecutionsTest {
         new TradeExecutions.Output() {
           @Override
           public void onTrade(PendingTrade trade, boolean executionStart, boolean executionEnd) {
-            published.add(
-                trade.sizeUnits() + ":" + (executionStart ? "T" : "F") + (executionEnd ? "T" : "F"));
+            String flags = (executionStart ? "T" : "F") + (executionEnd ? "T" : "F");
+            published.add(trade.sizeUnits() + ":" + flags);
           }
         });
     return published;
@@ -396,8 +396,8 @@ import com.bookmap.plugins.layer0.hyperliquid.session.SubscriptionRecord.Pending
 import java.util.List;
 
 /**
- * Marks where executions begin and end in a run of trades that is about to be published. Hyperliquid
- * reports one trade per maker filled, so a single aggressing transaction arrives as several trades
+ * Marks where executions begin and end in a run of trades that is about to be published.
+ * Hyperliquid reports one trade per maker filled, so a single aggressing transaction arrives as several trades
  * sharing a hash; Bookmap draws them as one execution when the first carries the start flag and the
  * last the end flag. Flags are derived from the list actually published, never earlier, so a trade
  * dropped by deduplication or a full buffer cannot leave an execution without its start or its end.
@@ -1026,10 +1026,11 @@ All edits are in `HyperliquidSession.java`, each a targeted `Edit`.
 
 ```java
   /**
-   * Handles a run of trades from one frame. Live trades are collected per subscription and published
-   * together, so that the fills of one transaction can be flagged as one execution.
+   * Handles a run of trades from one frame. Live trades are collected per subscription and
+   * published together, so that the fills of one transaction can be flagged as one execution.
    *
-   * @return false when the generation is no longer current and the rest of the frame must be dropped
+   * @return false when the generation is no longer current and the rest of the frame must be
+   *     dropped
    */
   private boolean handleTrades(long generation, List<TradeEvent> trades) {
     if (trades.isEmpty()) {
