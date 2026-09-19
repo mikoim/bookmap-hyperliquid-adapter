@@ -1,7 +1,7 @@
 # 約定の実行単位グルーピング — 設計書
 
 - 作成日: 2026-09-19
-- 状態: spec-review READY、人間の承認済み
+- 状態: spec-review READY、人間の承認済み、実装済み
 - 起点: ローカル main `08a6317`(メタデータ再取得の実装完了)
 - 対象: bookmap-hyperliquid-adapter(Bookmap Layer 0 マーケットデータアダプター)
 
