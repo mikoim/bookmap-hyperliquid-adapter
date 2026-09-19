@@ -11,11 +11,6 @@ import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMetaParser;
 import com.bookmap.plugins.layer0.hyperliquid.parse.ProtocolException;
 import com.bookmap.plugins.layer0.hyperliquid.transport.HyperliquidTransport;
 import com.bookmap.plugins.layer0.hyperliquid.transport.TransportFailure;
-import java.net.ConnectException;
-import java.net.NoRouteToHostException;
-import java.net.SocketException;
-import java.net.SocketTimeoutException;
-import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -353,7 +348,7 @@ public final class HyperliquidConnector implements AutoCloseable {
       spotMetadataRequest = postMetadata(SPOT_METADATA_REQUEST_JSON, false);
     } catch (Exception failure) {
       cancelMetadataRequests();
-      reportInitialFailure(classify(failure, TransportFailure.Kind.NETWORK));
+      reportInitialFailure(TransportFailure.classify(failure, TransportFailure.Kind.NETWORK));
     }
   }
 
@@ -389,7 +384,7 @@ public final class HyperliquidConnector implements AutoCloseable {
     try {
       transport.start();
     } catch (Exception failure) {
-      reportInitialFailure(classify(failure, TransportFailure.Kind.NETWORK));
+      reportInitialFailure(TransportFailure.classify(failure, TransportFailure.Kind.NETWORK));
       return;
     }
     attemptConnection(true);
@@ -409,7 +404,7 @@ public final class HyperliquidConnector implements AutoCloseable {
       spotMetadataRequest = null;
     }
     if (failure != null) {
-      failMetadata(classify(failure, TransportFailure.Kind.NETWORK));
+      failMetadata(TransportFailure.classify(failure, TransportFailure.Kind.NETWORK));
       return;
     }
     if (statusCode < 200 || statusCode >= 300) {
@@ -432,7 +427,7 @@ public final class HyperliquidConnector implements AutoCloseable {
       spotInstruments = null;
       listener.onMetadata(combined);
     } catch (ProtocolException failureException) {
-      failMetadata(classify(failureException, TransportFailure.Kind.PROTOCOL));
+      failMetadata(TransportFailure.classify(failureException, TransportFailure.Kind.PROTOCOL));
       return;
     }
     attemptConnection(true);
@@ -518,7 +513,8 @@ public final class HyperliquidConnector implements AutoCloseable {
         openedRequest.cancel();
       }
     } catch (RuntimeException failure) {
-      disconnectCurrent(classify(failure, TransportFailure.Kind.NETWORK), !initial);
+      disconnectCurrent(
+          TransportFailure.classify(failure, TransportFailure.Kind.NETWORK), !initial);
     }
   }
 
@@ -630,7 +626,8 @@ public final class HyperliquidConnector implements AutoCloseable {
   private void socketFailed(long callbackGeneration, Throwable failure) {
     if (isCurrentGeneration(callbackGeneration)) {
       disconnectCurrent(
-          classify(failure, TransportFailure.Kind.NETWORK), !initialConnection || socketOpened);
+          TransportFailure.classify(failure, TransportFailure.Kind.NETWORK),
+          !initialConnection || socketOpened);
     }
   }
 
@@ -763,7 +760,7 @@ public final class HyperliquidConnector implements AutoCloseable {
     pendingSends.remove(pending);
     pending.close();
     if (!pending.cancelled && isCurrentGeneration(pending.generation)) {
-      disconnectCurrent(classify(failure, TransportFailure.Kind.NETWORK), true);
+      disconnectCurrent(TransportFailure.classify(failure, TransportFailure.Kind.NETWORK), true);
     }
   }
 
@@ -1009,29 +1006,6 @@ public final class HyperliquidConnector implements AutoCloseable {
     if (cancellable != null) {
       cancellable.cancel();
     }
-  }
-
-  private TransportFailure classify(Throwable failure, TransportFailure.Kind fallback) {
-    TransportFailure.Kind kind =
-        isNetworkFailure(failure) ? TransportFailure.Kind.NETWORK : fallback;
-    String message = failure == null ? null : failure.getMessage();
-    return new TransportFailure(kind, message, failure);
-  }
-
-  private boolean isNetworkFailure(Throwable failure) {
-    Throwable current = failure;
-    while (current != null) {
-      if (current instanceof UnknownHostException
-          || current instanceof NoRouteToHostException
-          || current instanceof SocketException
-          || current instanceof ConnectException
-          || current instanceof SocketTimeoutException
-          || current instanceof TimeoutException) {
-        return true;
-      }
-      current = current.getCause();
-    }
-    return false;
   }
 
   private TransportFailure protocolFailure(String message, Throwable cause) {

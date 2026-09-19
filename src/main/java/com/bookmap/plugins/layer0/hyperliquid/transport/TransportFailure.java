@@ -1,5 +1,12 @@
 package com.bookmap.plugins.layer0.hyperliquid.transport;
 
+import java.net.ConnectException;
+import java.net.NoRouteToHostException;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
+import java.util.concurrent.TimeoutException;
+
 /** A classified, credential-free failure from Hyperliquid transport or protocol handling. */
 public final class TransportFailure {
 
@@ -22,6 +29,32 @@ public final class TransportFailure {
     this.kind = kind;
     this.message = message;
     this.cause = cause;
+  }
+
+  /**
+   * Classifies a raw failure. A network exception anywhere in the cause chain makes it {@link
+   * Kind#NETWORK}; anything else keeps the caller's fallback kind.
+   */
+  public static TransportFailure classify(Throwable failure, Kind fallback) {
+    Kind kind = isNetworkFailure(failure) ? Kind.NETWORK : fallback;
+    String message = failure == null ? null : failure.getMessage();
+    return new TransportFailure(kind, message, failure);
+  }
+
+  private static boolean isNetworkFailure(Throwable failure) {
+    Throwable current = failure;
+    while (current != null) {
+      if (current instanceof UnknownHostException
+          || current instanceof NoRouteToHostException
+          || current instanceof SocketException
+          || current instanceof ConnectException
+          || current instanceof SocketTimeoutException
+          || current instanceof TimeoutException) {
+        return true;
+      }
+      current = current.getCause();
+    }
+    return false;
   }
 
   /** Returns the broad failure origin. */
