@@ -169,8 +169,8 @@ public class ProviderTest {
     factory.sink.onInstrumentNotFound("X", "", "PERPETUAL");
     factory.sink.onInstrumentAlreadySubscribed("X", "", "PERPETUAL");
     factory.sink.onDepth("SOL", new DepthUpdate(true, 123, 45));
-    factory.sink.onTrade("SOL", 123d, 45, true);
-    factory.sink.onTrade("SOL", 124d, 46, false);
+    factory.sink.onTrade("SOL", 123d, 45, true, true, false);
+    factory.sink.onTrade("SOL", 124d, 46, false, false, true);
     factory.sink.onSystemMessage("note", MessageKind.UNCLASSIFIED);
     factory.sink.onSystemMessage("limit", MessageKind.SUBSCRIPTION_LIMIT);
 
@@ -200,6 +200,10 @@ public class ProviderTest {
     assertTrue(data.trades.get(0).isBidAggressor);
     assertFalse(data.trades.get(1).isOtc);
     assertFalse(data.trades.get(1).isBidAggressor);
+    assertTrue(data.trades.get(0).isExecutionStart);
+    assertFalse(data.trades.get(0).isExecutionEnd);
+    assertFalse(data.trades.get(1).isExecutionStart);
+    assertTrue(data.trades.get(1).isExecutionEnd);
     // Bookmap passes the real price; it is rendered with the instrument's pips scale.
     assertEquals("123.00", provider.formatPrice("SOL", 123d));
     assertEquals("123.46", provider.formatPrice("SOL", 123.456d));

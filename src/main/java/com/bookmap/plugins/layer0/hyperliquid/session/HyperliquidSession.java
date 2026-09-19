@@ -919,7 +919,8 @@ public final class HyperliquidSession
 
   private void publishIfNew(SubscriptionRecord record, PendingTrade trade) {
     if (tradeDeduplicator.markIfNew(trade.key(), clock.getAsLong())) {
-      sink.onTrade(record.alias(), trade.priceUnits(), trade.sizeUnits(), trade.buyAggressor());
+      sink.onTrade(
+          record.alias(), trade.priceUnits(), trade.sizeUnits(), trade.buyAggressor(), true, true);
       dataHealth.tradePublished(record.alias(), currentGeneration);
     }
   }

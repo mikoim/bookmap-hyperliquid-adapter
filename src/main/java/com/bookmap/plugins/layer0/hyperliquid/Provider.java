@@ -321,8 +321,14 @@ public final class Provider extends ExternalLiveBaseProvider {
     }
 
     @Override
-    public void onTrade(String alias, double priceUnits, int sizeUnits, boolean isBuyAggressor) {
-      TradeInfo tradeInfo = new TradeInfo(false, isBuyAggressor);
+    public void onTrade(
+        String alias,
+        double priceUnits,
+        int sizeUnits,
+        boolean isBuyAggressor,
+        boolean isExecutionStart,
+        boolean isExecutionEnd) {
+      TradeInfo tradeInfo = new TradeInfo(false, isBuyAggressor, isExecutionStart, isExecutionEnd);
       for (Layer1ApiDataListener listener : dataListeners) {
         listener.onTrade(alias, priceUnits, sizeUnits, tradeInfo);
       }

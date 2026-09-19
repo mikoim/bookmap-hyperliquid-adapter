@@ -104,8 +104,15 @@ final class RecordingSessionSink implements SessionSink {
   }
 
   @Override
-  public void onTrade(String alias, double priceUnits, int sizeUnits, boolean isBuyAggressor) {
-    trades.add(new Trade(alias, priceUnits, sizeUnits, isBuyAggressor));
+  public void onTrade(
+      String alias,
+      double priceUnits,
+      int sizeUnits,
+      boolean isBuyAggressor,
+      boolean isExecutionStart,
+      boolean isExecutionEnd) {
+    trades.add(
+        new Trade(alias, priceUnits, sizeUnits, isBuyAggressor, isExecutionStart, isExecutionEnd));
     events.add("trade:" + alias + ":" + priceUnits + ":" + sizeUnits);
   }
 
@@ -144,6 +151,8 @@ final class RecordingSessionSink implements SessionSink {
     private final double price;
     private final int size;
     private final boolean isBuyAggressor;
+    private final boolean executionStart;
+    private final boolean executionEnd;
 
     double price() {
       return price;
@@ -153,11 +162,27 @@ final class RecordingSessionSink implements SessionSink {
       return isBuyAggressor;
     }
 
-    Trade(String alias, double price, int size, boolean isBuyAggressor) {
+    boolean executionStart() {
+      return executionStart;
+    }
+
+    boolean executionEnd() {
+      return executionEnd;
+    }
+
+    Trade(
+        String alias,
+        double price,
+        int size,
+        boolean isBuyAggressor,
+        boolean executionStart,
+        boolean executionEnd) {
       this.alias = alias;
       this.price = price;
       this.size = size;
       this.isBuyAggressor = isBuyAggressor;
+      this.executionStart = executionStart;
+      this.executionEnd = executionEnd;
     }
   }
 }

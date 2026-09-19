@@ -30,8 +30,17 @@ public interface SessionSink {
   /** Reports one normalized depth update. */
   void onDepth(String alias, DepthUpdate update);
 
-  /** Reports one normalized trade. */
-  void onTrade(String alias, double priceUnits, int sizeUnits, boolean isBuyAggressor);
+  /**
+   * Publishes one trade. {@code isExecutionStart} marks the first trade of an execution and {@code
+   * isExecutionEnd} the last; a trade that stands alone has both set.
+   */
+  void onTrade(
+      String alias,
+      double priceUnits,
+      int sizeUnits,
+      boolean isBuyAggressor,
+      boolean isExecutionStart,
+      boolean isExecutionEnd);
 
   /** Reports a user-visible system message. */
   void onSystemMessage(String message, MessageKind kind);
