@@ -1,7 +1,7 @@
 # セッション中のメタデータ再取得 — 設計書
 
 - 作成日: 2026-09-19
-- 状態: spec-review READY、人間の承認待ち
+- 状態: spec-review READY、人間の承認済み
 - 起点: ローカル main `9b2f697`(TLS ホスト名検証の修正)
 - 対象: bookmap-hyperliquid-adapter(Bookmap Layer 0 マーケットデータアダプター)
 
