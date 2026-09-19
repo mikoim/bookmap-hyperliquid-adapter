@@ -622,8 +622,10 @@ import org.junit.Test;
 /** Session behavior when several trades of one transaction are published as one execution. */
 public class HyperliquidSessionTradeExecutionTest {
 
-  private static final String A = "0x00000000000000000000000000000000000000000000000000000000000000aa";
-  private static final String B = "0x00000000000000000000000000000000000000000000000000000000000000bb";
+  private static final String A =
+      "0x00000000000000000000000000000000000000000000000000000000000000aa";
+  private static final String B =
+      "0x00000000000000000000000000000000000000000000000000000000000000bb";
   private static final String ZERO =
       "0x0000000000000000000000000000000000000000000000000000000000000000";
 
@@ -991,7 +993,10 @@ pass; they pin behavior that must not change.
 
 All edits are in `HyperliquidSession.java`, each a targeted `Edit`.
 
-1. Replace the body of `handleMarketFrame`'s loop so consecutive trades are handled together:
+1. Replace the whole `handleMarketFrame` method — including its leading
+   `if (closed || generation != currentGeneration || generationInvalidated) return;` check, which
+   the new body performs before every book and, inside `handleTrades`, before every run of
+   trades — so consecutive trades are handled together:
 
 ```java
   private void handleMarketFrame(long generation, List<MarketDataEvent> events) {
@@ -1015,9 +1020,6 @@ All edits are in `HyperliquidSession.java`, each a targeted `Edit`.
     handleTrades(generation, trades);
   }
 ```
-
-   (Keep the method's existing leading check if it has one; the version above performs the same
-   check before every book and, inside `handleTrades`, before every run of trades.)
 
 2. Replace `handleTrade(TradeEvent)` with `handleTrades`. The per-trade decisions are the existing
    ones, unchanged; only the live branch differs — it collects instead of publishing:
