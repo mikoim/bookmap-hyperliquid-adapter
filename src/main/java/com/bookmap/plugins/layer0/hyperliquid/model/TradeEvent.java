@@ -11,16 +11,29 @@ public final class TradeEvent implements MarketDataEvent {
   private final boolean isBuyAggressor;
   private final BigDecimal price;
   private final BigDecimal size;
+  private final String executionId;
 
-  /** Creates a trade event. */
+  /**
+   * Creates a trade event.
+   *
+   * @param executionId the transaction hash shared by the fills of one execution, or null when the
+   *     exchange reported none
+   */
   public TradeEvent(
-      String coin, long time, long tid, boolean isBuyAggressor, BigDecimal price, BigDecimal size) {
+      String coin,
+      long time,
+      long tid,
+      boolean isBuyAggressor,
+      BigDecimal price,
+      BigDecimal size,
+      String executionId) {
     this.coin = coin;
     this.time = time;
     this.tid = tid;
     this.isBuyAggressor = isBuyAggressor;
     this.price = price;
     this.size = size;
+    this.executionId = executionId;
   }
 
   /** Returns the traded coin. */
@@ -51,6 +64,11 @@ public final class TradeEvent implements MarketDataEvent {
   /** Returns the exact trade quantity. */
   public BigDecimal size() {
     return size;
+  }
+
+  /** Returns the identifier shared by the fills of one execution, or null when there is none. */
+  public String executionId() {
+    return executionId;
   }
 
   /** Returns the value identity used to deduplicate this trade. */

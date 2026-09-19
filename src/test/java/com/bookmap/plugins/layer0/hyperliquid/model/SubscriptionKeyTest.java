@@ -113,7 +113,13 @@ public class SubscriptionKeyTest {
   public void derivesTradeKeyFromTradeEvent() {
     TradeEvent event =
         new TradeEvent(
-            "BTC", 1720000000000L, 42L, true, new BigDecimal("100.25"), new BigDecimal("1.5"));
+            "BTC",
+            1720000000000L,
+            42L,
+            true,
+            new BigDecimal("100.25"),
+            new BigDecimal("1.5"),
+            null);
     TradeKey expected = new TradeKey("BTC", 1720000000000L, 42L);
 
     assertEquals(expected, event.key());

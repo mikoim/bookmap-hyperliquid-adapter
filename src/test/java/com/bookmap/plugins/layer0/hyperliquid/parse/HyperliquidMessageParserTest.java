@@ -19,6 +19,53 @@ public class HyperliquidMessageParserTest {
 
   private final HyperliquidMessageParser parser = new HyperliquidMessageParser();
 
+  private static final String HASH =
+      "0xad8e0566e813bdf98176040e6d51bd011100efa789e89430cdf17964235f55d8";
+
+  @Test
+  public void tradeHashBecomesTheExecutionId() {
+    TradeEvent trade = onlyTrade(",\"hash\":\"" + HASH + "\"");
+
+    assertEquals(HASH, trade.executionId());
+  }
+
+  @Test
+  public void unusableTradeHashLeavesTheTradeWithoutAnExecutionId() {
+    String zero = "0x0000000000000000000000000000000000000000000000000000000000000000";
+    String[] hashFields = {
+      "",
+      ",\"hash\":null",
+      ",\"hash\":12",
+      ",\"hash\":\"\"",
+      ",\"hash\":\"0x\"",
+      ",\"hash\":\"" + zero + "\"",
+      ",\"hash\":\"0xzz\"",
+      ",\"hash\":\"ad8e\"",
+      ",\"hash\":[\"" + HASH + "\"]"
+    };
+    for (String hashField : hashFields) {
+      ParsedFrame frame = parser.parse(tradeFrame(hashField));
+
+      assertEquals(hashField, ParsedFrame.Disposition.ACCEPTED, frame.disposition());
+      assertTrue(hashField, frame.diagnostics().isEmpty());
+      assertEquals(hashField, 1, frame.marketEvents().size());
+      assertNull(hashField, ((TradeEvent) frame.marketEvents().get(0)).executionId());
+    }
+  }
+
+  private TradeEvent onlyTrade(String hashField) {
+    ParsedFrame frame = parser.parse(tradeFrame(hashField));
+    assertEquals(ParsedFrame.Disposition.ACCEPTED, frame.disposition());
+    return (TradeEvent) frame.marketEvents().get(0);
+  }
+
+  private static String tradeFrame(String hashField) {
+    return "{\"channel\":\"trades\",\"data\":[{\"coin\":\"BTC\",\"side\":\"B\",\"px\":\"100\","
+        + "\"sz\":\"1\",\"time\":1,\"tid\":1"
+        + hashField
+        + "}]}";
+  }
+
   @Test
   public void expandsTradeArrayInWireOrderAndKeepsLargeTidExact() {
     ParsedFrame frame =

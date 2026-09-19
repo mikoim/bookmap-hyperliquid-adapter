@@ -17,11 +17,13 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /** Parses Hyperliquid WebSocket messages into market-data and control-frame results. */
 public final class HyperliquidMessageParser {
 
   private static final long MAX_TID = (1L << 50) - 1L;
+  private static final Pattern TRANSACTION_HASH = Pattern.compile("0x[0-9a-fA-F]+");
 
   private final AssetContextCodec assetContextCodec = new AssetContextCodec();
 
@@ -101,7 +103,29 @@ public final class HyperliquidMessageParser {
     BigDecimal size = requiredPositiveDecimalString(trade, "sz");
     long time = requiredInteger(trade, "time", Long.MAX_VALUE);
     long tid = requiredInteger(trade, "tid", MAX_TID);
-    return new TradeEvent(coin, time, tid, buyAggressor, price, size);
+    return new TradeEvent(coin, time, tid, buyAggressor, price, size, executionId(trade));
+  }
+
+  /**
+   * Returns the transaction hash as the execution identifier. The field is optional and never
+   * rejects a trade: a missing, malformed or all-zero hash means the fill stands alone. All-zero
+   * hashes are real; the exchange sends them for fills no user transaction caused.
+   */
+  private String executionId(JsonObject trade) {
+    JsonElement element = trade.get("hash");
+    if (element == null || !element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
+      return null;
+    }
+    String hash = element.getAsString();
+    if (!TRANSACTION_HASH.matcher(hash).matches()) {
+      return null;
+    }
+    for (int index = 2; index < hash.length(); index++) {
+      if (hash.charAt(index) != '0') {
+        return hash;
+      }
+    }
+    return null;
   }
 
   private ParsedFrame parseL2Book(JsonObject object) throws ProtocolException {
