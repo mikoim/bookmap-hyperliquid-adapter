@@ -397,10 +397,11 @@ import java.util.List;
 
 /**
  * Marks where executions begin and end in a run of trades that is about to be published.
- * Hyperliquid reports one trade per maker filled, so a single aggressing transaction arrives as several trades
- * sharing a hash; Bookmap draws them as one execution when the first carries the start flag and the
- * last the end flag. Flags are derived from the list actually published, never earlier, so a trade
- * dropped by deduplication or a full buffer cannot leave an execution without its start or its end.
+ * Hyperliquid reports one trade per maker filled, so a single aggressing transaction arrives as
+ * several trades sharing a hash; Bookmap draws them as one execution when the first carries the
+ * start flag and the last the end flag. Flags are derived from the list actually published, never
+ * earlier, so a trade dropped by deduplication or a full buffer cannot leave an execution without
+ * its start or its end.
  */
 final class TradeExecutions {
 
