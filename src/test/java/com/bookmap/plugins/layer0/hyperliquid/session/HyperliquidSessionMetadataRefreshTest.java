@@ -134,6 +134,86 @@ public class HyperliquidSessionMetadataRefreshTest {
     assertEquals(0, fixture.transport.httpHandleCount());
   }
 
+  private static final String SUFFIX =
+      " no longer listed by Hyperliquid; open subscriptions stay active until removed";
+
+  @Test
+  public void unlistedSubscriptionStaysOpenAndIsReportedOnce() {
+    Fixture fixture = new Fixture();
+    fixture.login("BTC", "ETH");
+    fixture.activate("ETH");
+
+    fixture.refreshTo("BTC");
+
+    assertEquals("[UNCLASSIFIED:ETH" + SUFFIX + "]", fixture.sink.systemMessages().toString());
+    assertEquals(0, count(fixture.sink.events(), "instrument-removed:ETH"));
+    // The subscription still publishes.
+    fixture.session.onFrame(
+        fixture.generation,
+        "{\"channel\":\"l2Book\",\"data\":{\"coin\":\"ETH\",\"time\":2,"
+            + "\"levels\":[[{\"px\":\"101.000\",\"sz\":\"1\"}],[]]}}");
+    fixture.drain();
+    assertTrue(count(fixture.sink.events(), "depth:ETH") >= 2);
+
+    fixture.refreshTo("BTC");
+    assertEquals(1, fixture.sink.systemMessages().size());
+  }
+
+  @Test
+  public void instrumentsUnlistedTogetherShareOneSortedMessage() {
+    Fixture fixture = new Fixture();
+    fixture.login("BTC", "SOL", "ETH");
+    fixture.activate("SOL");
+    fixture.activate("ETH");
+
+    fixture.refreshTo("BTC");
+
+    assertEquals("[UNCLASSIFIED:ETH, SOL" + SUFFIX + "]", fixture.sink.systemMessages().toString());
+  }
+
+  @Test
+  public void relistingRearmsTheReport() {
+    Fixture fixture = new Fixture();
+    fixture.login("BTC", "ETH");
+    fixture.activate("ETH");
+    fixture.refreshTo("BTC");
+
+    fixture.refreshTo("BTC", "ETH");
+    assertEquals(1, fixture.sink.systemMessages().size());
+    fixture.refreshTo("BTC");
+
+    assertEquals(2, fixture.sink.systemMessages().size());
+  }
+
+  @Test
+  public void unsubscribingRearmsTheReport() {
+    Fixture fixture = new Fixture();
+    fixture.login("BTC", "ETH");
+    fixture.activate("ETH");
+    fixture.refreshTo("BTC");
+    fixture.session.unsubscribe("ETH");
+    fixture.drain();
+
+    fixture.refreshTo("BTC", "ETH");
+    fixture.activate("ETH");
+    fixture.refreshTo("BTC");
+
+    assertEquals(2, fixture.sink.systemMessages().size());
+  }
+
+  @Test
+  public void unlistedInstrumentCannotBeSubscribedAgain() {
+    Fixture fixture = new Fixture();
+    fixture.login("BTC", "ETH");
+    fixture.refreshTo("BTC");
+
+    fixture.session.subscribe("ETH", "", "PERPETUAL");
+    fixture.drain();
+
+    assertEquals(1, count(fixture.sink.events(), "not-found:ETH"));
+    assertTrue(fixture.sink.systemMessages().isEmpty());
+  }
+
   static String perps(String... symbols) {
     return TestMetadata.allPerpMetas(TestMetadata.universe(symbols));
   }

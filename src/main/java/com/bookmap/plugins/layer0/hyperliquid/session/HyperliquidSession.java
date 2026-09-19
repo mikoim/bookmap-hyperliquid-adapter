@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.TimeoutException;
 import java.util.function.LongSupplier;
 
@@ -76,6 +77,7 @@ public final class HyperliquidSession
       new TreeMap<SubscriptionKey, Long>();
   private final Set<SubscriptionKey> timedOutAcknowledgements = new HashSet<SubscriptionKey>();
   private final Set<String> knownCoins = new HashSet<String>();
+  private final Set<String> unlistedNotified = new HashSet<String>();
 
   private boolean closed;
   private boolean metadataReceived;
@@ -247,6 +249,43 @@ public final class HyperliquidSession
     }
     replaceInstruments(metadata);
     sink.onKnownInstruments(new ArrayList<Instrument>(instruments.values()));
+    reportUnlistedSubscriptions();
+  }
+
+  /**
+   * Reports, once per listing, the open subscriptions whose instrument left the list. The
+   * subscription is left alone: an exchange can keep publishing a delisted book for a while, and
+   * {@code BOOK_STALE} already covers a feed that goes quiet.
+   */
+  private void reportUnlistedSubscriptions() {
+    unlistedNotified.retainAll(unlistedAliases());
+    TreeSet<String> unreported = new TreeSet<String>(unlistedAliases());
+    unreported.removeAll(unlistedNotified);
+    if (unreported.isEmpty()) {
+      return;
+    }
+    unlistedNotified.addAll(unreported);
+    StringBuilder message = new StringBuilder();
+    for (String alias : unreported) {
+      if (message.length() > 0) {
+        message.append(", ");
+      }
+      message.append(alias);
+    }
+    message.append(
+        " no longer listed by Hyperliquid; open subscriptions stay active until removed");
+    sink.onSystemMessage(message.toString(), MessageKind.UNCLASSIFIED);
+  }
+
+  private Set<String> unlistedAliases() {
+    Set<String> aliases = new HashSet<String>();
+    for (SubscriptionRecord record : records.values()) {
+      if (record.state() != SubscriptionRecord.State.REMOVED
+          && !instruments.containsKey(record.alias())) {
+        aliases.add(record.alias());
+      }
+    }
+    return aliases;
   }
 
   /** A failed refresh is not an incident: the previous list stays in force until the next one. */
@@ -899,6 +938,7 @@ public final class HyperliquidSession
       return;
     }
     dataHealth.remove(record.alias());
+    unlistedNotified.remove(record.alias());
     boolean wasActive = record.state() == SubscriptionRecord.State.ACTIVE;
     if (wasActive
         && (cause == RemovalCause.UNSUPPORTED_PRICE
