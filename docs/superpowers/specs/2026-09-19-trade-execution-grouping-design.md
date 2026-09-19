@@ -1,7 +1,7 @@
 # 約定の実行単位グルーピング — 設計書
 
 - 作成日: 2026-09-19
-- 状態: 設計承認済み、spec-review 待ち
+- 状態: spec-review READY、人間の承認待ち
 - 起点: ローカル main `08a6317`(メタデータ再取得の実装完了)
 - 対象: bookmap-hyperliquid-adapter(Bookmap Layer 0 マーケットデータアダプター)
 
@@ -128,8 +128,11 @@ final class TradeExecutions {
     (重複判定、あふれ時の `tradeGap` と診断も現行どおり)
   - それ以外(ライブ)→ `tradeDeduplicator.markIfNew` が `true` のものだけ、その record の
     公開リストに追加する
-  - record が直前の約定と変わったとき、およびリストの末尾で、溜まった公開リストを
-    `publishTrades(record, list)` で排出する
+  - 公開リストに約定を追加しようとして、その record が溜まっている公開リストの record と
+    異なるとき、およびリストの末尾で、溜まった公開リストを `publishTrades(record, list)` で
+    排出する。捨てた約定とバッファへ送った約定は、公開リストを区切らない
+  - 捨てた約定の診断は判定した時点で出す。したがって同じフレーム内では、診断が、それより前に
+    届いた約定の公開より先に出ることがある。約定の公開順とフラグには影響しない
 - `publishTrades(SubscriptionRecord record, List<PendingTrade> trades)`:
   `TradeExecutions.publish` を呼び、`Output` の中で
   `sink.onTrade(record.alias(), priceUnits, sizeUnits, buyAggressor, executionStart, executionEnd)` と
@@ -244,4 +247,5 @@ activateIfReady / maybeRestore
 - WebSocket Subscriptions(`WsTrade`): https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions
 - L1 data schemas(`hash` の例): https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/nodes/l1-data-schemas
 - Bookmap API Core Javadoc(`TradeInfo`、`TradeAggregator`): https://javadoc.bookmap.com/maven2/releases/com/bookmap/api/api-core/7.6.0.30/
+  (公開 Javadoc は 7.6.0.30。コンストラクタの挙動はビルドが使う 7.8.0.13 の JAR で確認した)
 - 先行仕様: `2026-09-06-borsa-hyperdash-data-sources-design.md`(全ゼロ hash の観測)
