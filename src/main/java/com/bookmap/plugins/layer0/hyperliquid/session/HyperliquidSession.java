@@ -734,19 +734,24 @@ public final class HyperliquidSession
   }
 
   private void handleMarketFrame(long generation, List<MarketDataEvent> events) {
-    if (closed || generation != currentGeneration || generationInvalidated) {
-      return;
-    }
+    List<TradeEvent> trades = new ArrayList<TradeEvent>();
     for (MarketDataEvent event : events) {
+      if (event instanceof TradeEvent) {
+        trades.add((TradeEvent) event);
+        continue;
+      }
+      if (!handleTrades(generation, trades)) {
+        return;
+      }
+      trades = new ArrayList<TradeEvent>();
       if (closed || generation != currentGeneration || generationInvalidated) {
         return;
       }
       if (event instanceof BookSnapshot) {
         handleBook((BookSnapshot) event);
-      } else if (event instanceof TradeEvent) {
-        handleTrade((TradeEvent) event);
       }
     }
+    handleTrades(generation, trades);
   }
 
   private void handleBook(BookSnapshot snapshot) {
@@ -837,41 +842,62 @@ public final class HyperliquidSession
     return true;
   }
 
-  private void handleTrade(TradeEvent trade) {
-    SubscriptionRecord record = records.get(trade.coin());
-    if (record == null || record.state() == SubscriptionRecord.State.REMOVED) {
-      sink.onDiagnostic("discarded trade for unsubscribed coin: " + trade.coin());
+  /**
+   * Handles a run of trades from one frame. Live trades are collected per subscription and
+   * published together, so that the fills of one transaction can be flagged as one execution.
+   *
+   * @return false when the generation is no longer current and the rest of the frame must be
+   *     dropped
+   */
+  private boolean handleTrades(long generation, List<TradeEvent> trades) {
+    if (trades.isEmpty()) {
+      return true;
+    }
+    if (closed || generation != currentGeneration || generationInvalidated) {
+      return false;
+    }
+    SubscriptionRecord publishing = null;
+    List<PendingTrade> publishable = new ArrayList<PendingTrade>();
+    for (TradeEvent trade : trades) {
+      SubscriptionRecord record = records.get(trade.coin());
+      if (record == null || record.state() == SubscriptionRecord.State.REMOVED) {
+        sink.onDiagnostic("discarded trade for unsubscribed coin: " + trade.coin());
+        continue;
+      }
+      PendingTrade converted = convertTrade(record, trade);
+      if (converted == null) {
+        continue;
+      }
+      boolean pendingBook = record.state() == SubscriptionRecord.State.PENDING_BOOK;
+      if (pendingBook || (recovering && connectionState == ConnectionState.RECONNECTING)) {
+        bufferTrade(record, converted, pendingBook ? "pending" : "recovery");
+        continue;
+      }
+      if (!tradeDeduplicator.markIfNew(converted.key(), clock.getAsLong())) {
+        continue;
+      }
+      if (publishing != record) {
+        publishTrades(publishing, publishable);
+        publishable = new ArrayList<PendingTrade>();
+        publishing = record;
+      }
+      publishable.add(converted);
+    }
+    publishTrades(publishing, publishable);
+    return true;
+  }
+
+  /** Buffers a trade that cannot be published yet; a full buffer is reported once per incident. */
+  private void bufferTrade(SubscriptionRecord record, PendingTrade trade, String bufferName) {
+    if (tradeDeduplicator.contains(trade.key(), clock.getAsLong())
+        || record.containsPendingTradeKey(trade.key())) {
       return;
     }
-    PendingTrade converted = convertTrade(record, trade);
-    if (converted == null) {
-      return;
+    if (!record.addPendingTrade(trade) && !record.pendingTradeOverflowWarned()) {
+      record.markPendingTradeOverflowWarned();
+      dataHealth.tradeGap(record.alias(), currentGeneration, "trade buffer overflow");
+      sink.onDiagnostic(bufferName + " trade buffer full for " + record.alias());
     }
-    if (record.state() == SubscriptionRecord.State.PENDING_BOOK) {
-      if (tradeDeduplicator.contains(converted.key(), clock.getAsLong())
-          || record.containsPendingTradeKey(converted.key())) {
-        return;
-      }
-      if (!record.addPendingTrade(converted) && !record.pendingTradeOverflowWarned()) {
-        record.markPendingTradeOverflowWarned();
-        dataHealth.tradeGap(record.alias(), currentGeneration, "trade buffer overflow");
-        sink.onDiagnostic("pending trade buffer full for " + record.alias());
-      }
-      return;
-    }
-    if (recovering && connectionState == ConnectionState.RECONNECTING) {
-      if (tradeDeduplicator.contains(converted.key(), clock.getAsLong())
-          || record.containsPendingTradeKey(converted.key())) {
-        return;
-      }
-      if (!record.addPendingTrade(converted) && !record.pendingTradeOverflowWarned()) {
-        record.markPendingTradeOverflowWarned();
-        dataHealth.tradeGap(record.alias(), currentGeneration, "trade buffer overflow");
-        sink.onDiagnostic("recovery trade buffer full for " + record.alias());
-      }
-      return;
-    }
-    publishIfNew(record, converted);
   }
 
   private PendingTrade convertTrade(SubscriptionRecord record, TradeEvent trade) {
@@ -905,10 +931,7 @@ public final class HyperliquidSession
       publishDepth(record, record.diff().apply(record.takePendingBook(), false));
     }
     dataHealth.bookPublished(record.alias(), currentGeneration);
-    ArrayDeque<PendingTrade> pending = record.takePendingTrades();
-    while (!pending.isEmpty()) {
-      publishIfNew(record, pending.removeFirst());
-    }
+    publishBuffered(record, record.takePendingTrades());
   }
 
   private void publishDepth(SubscriptionRecord record, List<DepthUpdate> updates) {
@@ -917,12 +940,37 @@ public final class HyperliquidSession
     }
   }
 
-  private void publishIfNew(SubscriptionRecord record, PendingTrade trade) {
-    if (tradeDeduplicator.markIfNew(trade.key(), clock.getAsLong())) {
-      sink.onTrade(
-          record.alias(), trade.priceUnits(), trade.sizeUnits(), trade.buyAggressor(), true, true);
-      dataHealth.tradePublished(record.alias(), currentGeneration);
+  /** Publishes trades that already passed deduplication, flagged as executions. */
+  private void publishTrades(final SubscriptionRecord record, List<PendingTrade> trades) {
+    if (record == null || trades.isEmpty()) {
+      return;
     }
+    TradeExecutions.publish(
+        trades,
+        new TradeExecutions.Output() {
+          @Override
+          public void onTrade(PendingTrade trade, boolean executionStart, boolean executionEnd) {
+            sink.onTrade(
+                record.alias(),
+                trade.priceUnits(),
+                trade.sizeUnits(),
+                trade.buyAggressor(),
+                executionStart,
+                executionEnd);
+            dataHealth.tradePublished(record.alias(), currentGeneration);
+          }
+        });
+  }
+
+  /** Publishes a drained buffer, dropping whatever was published in the meantime. */
+  private void publishBuffered(SubscriptionRecord record, ArrayDeque<PendingTrade> buffered) {
+    List<PendingTrade> fresh = new ArrayList<PendingTrade>(buffered.size());
+    for (PendingTrade trade : buffered) {
+      if (tradeDeduplicator.markIfNew(trade.key(), clock.getAsLong())) {
+        fresh.add(trade);
+      }
+    }
+    publishTrades(record, fresh);
   }
 
   private SubscriptionRecord recordForKey(SubscriptionKey key) {
@@ -1097,10 +1145,7 @@ public final class HyperliquidSession
           // watched from here rather than waiting for a publication that may never come.
           dataHealth.awaitBook(record.alias(), generation);
         }
-        ArrayDeque<PendingTrade> pending = record.takePendingTrades();
-        while (!pending.isEmpty()) {
-          publishIfNew(record, pending.removeFirst());
-        }
+        publishBuffered(record, record.takePendingTrades());
       } else if (record.state() == SubscriptionRecord.State.PENDING_BOOK) {
         activateIfReady(record);
       }
