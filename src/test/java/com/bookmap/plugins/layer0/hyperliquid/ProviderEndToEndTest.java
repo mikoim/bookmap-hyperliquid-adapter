@@ -702,6 +702,36 @@ public class ProviderEndToEndTest {
     fixture.assertClosed();
   }
 
+  @Test
+  public void instrumentListedDuringTheSessionBecomesSubscribable() {
+    Fixture fixture = new Fixture(budget(2, 20, 50, 2));
+    fixture.loginWithMetadata("BTC");
+    assertFalse(knownSymbols(fixture).contains("NEW"));
+
+    fixture.advance(1_800_000L);
+    fixture.transport.completeMeta(
+        200, TestMetadata.allPerpMetas(TestMetadata.universe("BTC", "NEW")));
+    fixture.drain();
+
+    assertTrue(knownSymbols(fixture).contains("NEW"));
+    fixture.subscribe("NEW");
+    fixture.completeSends();
+    fixture.ack("NEW", "l2Book");
+    fixture.ack("NEW", "trades");
+    fixture.book("NEW", 1L, "100", "1", "101", "2");
+    fixture.drain();
+    assertTrue(
+        fixture.data.depths.toString(), fixture.data.depths.toString().contains("depth:NEW:"));
+  }
+
+  private static List<String> knownSymbols(Fixture fixture) {
+    List<String> symbols = new ArrayList<String>();
+    for (SubscribeInfo info : fixture.provider.getSupportedFeatures().knownInstruments) {
+      symbols.add(info.symbol);
+    }
+    return symbols;
+  }
+
   private static HyperliquidProcessBudget budget(
       int connections, int attempts, int frames, int subscriptions) {
     try {

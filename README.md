@@ -68,6 +68,12 @@ Hyperliquid itself.
 Supported: `PERPETUAL` subscriptions for every live perpetual on every perp dex, HIP-3 markets
 included, and `SPOT` subscriptions for every spot pair.
 
+The instrument list is fetched again every 30 minutes and after every reconnect, so a market listed
+during a session shows up in the Subscribe dialog without logging in again. If an instrument you
+are subscribed to leaves the list, the adapter says so once in a system message and keeps the
+subscription open until you remove it; `BOOK_STALE` reports it if the exchange stops publishing. A
+failed refresh keeps the previous list and is only logged.
+
 Not supported: historical data, account data, credentials, order entry, and gap filling. Order
 APIs fail closed with a read-only system message.
 

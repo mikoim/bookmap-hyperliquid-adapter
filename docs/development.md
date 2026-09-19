@@ -40,13 +40,13 @@ documentation is in the Javadoc; this table is only a map of where to start read
 
 | Package | Responsibility |
 | --- | --- |
-| `hyperliquid` | Layer 0 entry point: provider, connectivity fields, source selection, connection lifecycle |
+| `hyperliquid` | Layer 0 entry point: provider, connectivity fields, source selection, connection lifecycle, the instrument-metadata request |
 | `hyperliquid.book` | Holding and publishing the book: folding seeds and deltas, aggregating onto the subscription's tick |
 | `hyperliquid.budget` | Process-wide reservations for connection, send, and subscription limits |
 | `hyperliquid.concurrent` | Serializing state work and bounding market-data frames |
 | `hyperliquid.model` | Immutable value and domain types, including the perpetual/spot `Instrument` |
 | `hyperliquid.parse` | Turning WebSocket and REST JSON into domain types |
-| `hyperliquid.session` | Bridging to Bookmap session output: subscription state, data-health monitoring, and the extra mark-price connection a relay source needs |
+| `hyperliquid.session` | Bridging to Bookmap session output: subscription state, data-health monitoring, the periodic metadata refresh, and the extra mark-price connection a relay source needs |
 | `hyperliquid.trade` | Duplicate suppression for trade notifications |
 | `hyperliquid.transport` | Asynchronous WebSocket boundary, implemented on Jetty |
 
