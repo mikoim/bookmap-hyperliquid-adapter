@@ -258,8 +258,9 @@ public final class HyperliquidSession
    * {@code BOOK_STALE} already covers a feed that goes quiet.
    */
   private void reportUnlistedSubscriptions() {
-    unlistedNotified.retainAll(unlistedAliases());
-    TreeSet<String> unreported = new TreeSet<String>(unlistedAliases());
+    Set<String> unlisted = unlistedAliases();
+    unlistedNotified.retainAll(unlisted);
+    TreeSet<String> unreported = new TreeSet<String>(unlisted);
     unreported.removeAll(unlistedNotified);
     if (unreported.isEmpty()) {
       return;
@@ -292,7 +293,8 @@ public final class HyperliquidSession
   @Override
   public void onMetadataRefreshFailed(TransportFailure failure) {
     if (!closed) {
-      sink.onDiagnostic("metadata refresh failed: " + failure.message());
+      String reason = failure.message() == null ? failure.kind().name() : failure.message();
+      sink.onDiagnostic("metadata refresh failed: " + reason);
     }
   }
 

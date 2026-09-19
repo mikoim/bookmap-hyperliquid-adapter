@@ -214,6 +214,31 @@ public class HyperliquidSessionMetadataRefreshTest {
     assertTrue(fixture.sink.systemMessages().isEmpty());
   }
 
+  @Test
+  public void unlistedSpotPairIsReportedByItsSymbol() {
+    Fixture fixture = new Fixture();
+    fixture.loginWithSpot("BTC", "HYPE");
+    fixture.activate("HYPE/USDC", "SPOT", "@1");
+
+    fixture.refreshTo("BTC");
+
+    assertEquals(
+        "[UNCLASSIFIED:HYPE/USDC" + SUFFIX + "]", fixture.sink.systemMessages().toString());
+    assertEquals(0, count(fixture.sink.events(), "instrument-removed:HYPE/USDC"));
+  }
+
+  @Test
+  public void failedRefreshWithoutAMessageNamesTheFailureKind() {
+    Fixture fixture = new Fixture();
+    fixture.login("BTC");
+
+    fixture.advance(INTERVAL);
+    fixture.transport.failMeta(new java.net.SocketException());
+    fixture.drain();
+
+    assertEquals(1, count(fixture.sink.events(), "diagnostic:metadata refresh failed: NETWORK"));
+  }
+
   static String perps(String... symbols) {
     return TestMetadata.allPerpMetas(TestMetadata.universe(symbols));
   }
@@ -312,6 +337,19 @@ public class HyperliquidSessionMetadataRefreshTest {
       drain();
     }
 
+    /** Like {@link #login}, but with a non-empty spot universe alongside the given perp. */
+    void loginWithSpot(String perp, String spotBase) {
+      session.login(SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
+      drain();
+      transport.completeSpotMeta(200, TestMetadata.spotMetaWithUsdcPairs(spotBase));
+      transport.completeMeta(200, perps(perp));
+      drain();
+      transport.openSocket();
+      drain();
+      transport.socket().succeedNextSend(); // fastAssetCtxs
+      drain();
+    }
+
     void reconnect() {
       transport.remoteClose(1006, "lost");
       drain();
@@ -324,7 +362,11 @@ public class HyperliquidSessionMetadataRefreshTest {
     }
 
     void activate(String coin) {
-      session.subscribe(coin, "", "PERPETUAL");
+      activate(coin, "PERPETUAL", coin);
+    }
+
+    void activate(String symbol, String type, String coin) {
+      session.subscribe(symbol, "", type);
       drain();
       completeAllSends();
       session.onFrame(

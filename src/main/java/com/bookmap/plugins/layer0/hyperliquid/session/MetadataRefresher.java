@@ -123,7 +123,11 @@ final class MetadataRefresher {
     inFlight.start();
   }
 
-  /** A cancelled request never calls back, so reaching here means the refresher is still open. */
+  /**
+   * A cancelled request never calls back, so reaching here means the refresher is still open. The
+   * next timer is armed here, before the listener is called, so that a listener which closes the
+   * refresher still leaves no timer behind: {@link #close()} cancels it.
+   */
   private void finished() {
     inFlight = null;
     scheduleNext();

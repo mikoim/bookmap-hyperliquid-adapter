@@ -16,8 +16,8 @@ import java.util.function.Consumer;
  */
 public final class MetadataRequest {
 
-  static final String PERP_METADATA_REQUEST_JSON = "{\"type\":\"allPerpMetas\"}";
-  static final String SPOT_METADATA_REQUEST_JSON = "{\"type\":\"spotMeta\"}";
+  private static final String PERP_METADATA_REQUEST_JSON = "{\"type\":\"allPerpMetas\"}";
+  private static final String SPOT_METADATA_REQUEST_JSON = "{\"type\":\"spotMeta\"}";
   private static final long TIMEOUT_MILLIS = 10_000L;
 
   /** Receives the outcome exactly once, unless the request is cancelled first. */
