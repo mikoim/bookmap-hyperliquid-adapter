@@ -124,9 +124,31 @@ public class HyperliquidSessionTradeExecutionTest {
     assertEquals("[depth, depth, trade, trade, depth, depth]", kinds.toString());
   }
 
-  /** One buy fill; {@code hash == null} omits the field. */
+  @Test
+  public void fillsOfDifferentInstrumentsInOneFrameNeverShareAnExecution() {
+    Fixture fixture = new Fixture();
+    fixture.login();
+    fixture.subscribeBtc();
+    fixture.subscribe("ETH");
+    fixture.bookAndAcks();
+    fixture.bookAndAcks("ETH");
+
+    fixture.trades(fill("BTC", 1, A), fill("ETH", 2, A), fill("BTC", 3, A));
+
+    assertEquals("[TT, TT, TT]", fixture.flags().toString());
+    assertEquals("[BTC, ETH, BTC]", fixture.aliases().toString());
+  }
+
+  /** One BTC buy fill; {@code hash == null} omits the field. */
   private static String fill(long tid, String hash) {
-    return "{\"coin\":\"BTC\",\"side\":\"B\",\"px\":\"101.000\",\"sz\":\"1\",\"time\":5,\"tid\":"
+    return fill("BTC", tid, hash);
+  }
+
+  /** One buy fill for {@code coin}; {@code hash == null} omits the field. */
+  private static String fill(String coin, long tid, String hash) {
+    return "{\"coin\":\""
+        + coin
+        + "\",\"side\":\"B\",\"px\":\"101.000\",\"sz\":\"1\",\"time\":5,\"tid\":"
         + tid
         + (hash == null ? "" : ",\"hash\":\"" + hash + "\"")
         + "}";
@@ -208,7 +230,7 @@ public class HyperliquidSessionTradeExecutionTest {
     private void login() {
       session.login(SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
       drain();
-      transport.completeMeta(200, TestMetadata.allPerpMetas(TestMetadata.universe("BTC")));
+      transport.completeMeta(200, TestMetadata.allPerpMetas(TestMetadata.universe("BTC", "ETH")));
       drain();
       transport.openSocket();
       drain();
@@ -222,15 +244,23 @@ public class HyperliquidSessionTradeExecutionTest {
     }
 
     private void subscribeBtc() {
-      session.subscribe("BTC", "", "PERPETUAL");
+      subscribe("BTC");
+    }
+
+    private void subscribe(String coin) {
+      session.subscribe(coin, "", "PERPETUAL");
       drain();
       completeAllSends();
     }
 
     private void bookAndAcks() {
-      book("100.000", bookTime++);
-      ack(SubscriptionType.L2_BOOK);
-      ack(SubscriptionType.TRADES);
+      bookAndAcks("BTC");
+    }
+
+    private void bookAndAcks(String coin) {
+      book(coin, "100.000", bookTime++);
+      ack(coin, SubscriptionType.L2_BOOK);
+      ack(coin, SubscriptionType.TRADES);
       drain();
     }
 
@@ -264,9 +294,15 @@ public class HyperliquidSessionTradeExecutionTest {
     }
 
     private void book(String price, long time) {
+      book("BTC", price, time);
+    }
+
+    private void book(String coin, String price, long time) {
       session.onFrame(
           generation,
-          "{\"channel\":\"l2Book\",\"data\":{\"coin\":\"BTC\",\"time\":"
+          "{\"channel\":\"l2Book\",\"data\":{\"coin\":\""
+              + coin
+              + "\",\"time\":"
               + time
               + ",\"levels\":[[{\"px\":\""
               + price
@@ -274,12 +310,18 @@ public class HyperliquidSessionTradeExecutionTest {
     }
 
     private void ack(SubscriptionType type) {
+      ack("BTC", type);
+    }
+
+    private void ack(String coin, SubscriptionType type) {
       session.onFrame(
           generation,
           "{\"channel\":\"subscriptionResponse\",\"data\":{\"method\":\"subscribe\","
               + "\"subscription\":{\"type\":\""
               + type.wireName()
-              + "\",\"coin\":\"BTC\"}}}");
+              + "\",\"coin\":\""
+              + coin
+              + "\"}}}");
     }
 
     private List<String> flags() {
@@ -288,6 +330,14 @@ public class HyperliquidSessionTradeExecutionTest {
         flags.add((trade.executionStart() ? "T" : "F") + (trade.executionEnd() ? "T" : "F"));
       }
       return flags;
+    }
+
+    private List<String> aliases() {
+      List<String> aliases = new ArrayList<String>();
+      for (RecordingSessionSink.Trade trade : sink.trades()) {
+        aliases.add(trade.alias());
+      }
+      return aliases;
     }
 
     private void drain() {

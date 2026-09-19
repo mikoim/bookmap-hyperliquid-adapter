@@ -154,6 +154,10 @@ final class RecordingSessionSink implements SessionSink {
     private final boolean executionStart;
     private final boolean executionEnd;
 
+    String alias() {
+      return alias;
+    }
+
     double price() {
       return price;
     }

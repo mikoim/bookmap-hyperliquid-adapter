@@ -738,16 +738,13 @@ public final class HyperliquidSession
     for (MarketDataEvent event : events) {
       if (event instanceof TradeEvent) {
         trades.add((TradeEvent) event);
-        continue;
-      }
-      if (!handleTrades(generation, trades)) {
-        return;
-      }
-      trades = new ArrayList<TradeEvent>();
-      if (closed || generation != currentGeneration || generationInvalidated) {
-        return;
-      }
-      if (event instanceof BookSnapshot) {
+      } else if (event instanceof BookSnapshot) {
+        // Trades that arrived before a book are published before it.
+        handleTrades(generation, trades);
+        trades.clear();
+        if (closed || generation != currentGeneration || generationInvalidated) {
+          return;
+        }
         handleBook((BookSnapshot) event);
       }
     }
@@ -845,16 +842,11 @@ public final class HyperliquidSession
   /**
    * Handles a run of trades from one frame. Live trades are collected per subscription and
    * published together, so that the fills of one transaction can be flagged as one execution.
-   *
-   * @return false when the generation is no longer current and the rest of the frame must be
-   *     dropped
+   * Nothing is published once the generation is no longer current.
    */
-  private boolean handleTrades(long generation, List<TradeEvent> trades) {
-    if (trades.isEmpty()) {
-      return true;
-    }
-    if (closed || generation != currentGeneration || generationInvalidated) {
-      return false;
+  private void handleTrades(long generation, List<TradeEvent> trades) {
+    if (trades.isEmpty() || closed || generation != currentGeneration || generationInvalidated) {
+      return;
     }
     SubscriptionRecord publishing = null;
     List<PendingTrade> publishable = new ArrayList<PendingTrade>();
@@ -884,7 +876,6 @@ public final class HyperliquidSession
       publishable.add(converted);
     }
     publishTrades(publishing, publishable);
-    return true;
   }
 
   /** Buffers a trade that cannot be published yet; a full buffer is reported once per incident. */
