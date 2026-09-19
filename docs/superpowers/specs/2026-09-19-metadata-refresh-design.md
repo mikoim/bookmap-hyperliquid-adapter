@@ -1,7 +1,7 @@
 # セッション中のメタデータ再取得 — 設計書
 
 - 作成日: 2026-09-19
-- 状態: 設計承認済み、spec-review 待ち
+- 状態: spec-review READY、人間の承認待ち
 - 起点: ローカル main `9b2f697`(TLS ホスト名検証の修正)
 - 対象: bookmap-hyperliquid-adapter(Bookmap Layer 0 マーケットデータアダプター)
 
@@ -102,6 +102,9 @@ public final class MetadataRequest {
   - `postJson` 自体が例外を投げた → `TransportFailure.classify(e, NETWORK)`
 - 完了後、または `cancel()` 後に届いた transport のコールバックは破棄する
 - `start()` を 2 回呼ぶと `IllegalStateException`
+- `postJson` が同期的に例外を投げた場合、`onFailure` は `start()` の中から同期的に呼ばれる。
+  呼び出し側は `start()` より前に自分の「進行中」の状態(connector の `metadataRequest`
+  フィールド、`MetadataRefresher` の進行中の印)を設定し、コールバック内でそれを解除する
 
 #### `TransportFailure.classify`(既存クラスへの static 追加)
 
@@ -173,7 +176,7 @@ final class MetadataRefresher {
 
 - コンストラクタに `MetadataRefresher.RequestFactory` を生成するための
   `MetadataRequestFactory`(`SourceProfile -> MetadataRequest.Callback -> MetadataRequest`)を
-  追加する。`infoUri` はログイン時の `SourceProfile` で決まるため、`MetadataRefresher` は
+  追加する。`AssetContextConnectorFactory` に倣い、session パッケージの public interface とする。`infoUri` はログイン時の `SourceProfile` で決まるため、`MetadataRefresher` は
   `handleLogin` で `profile` が確定した時点で生成する
 - `onSocketOpened`: 初回接続(`!connectedOnce` の分岐)で `refresher.start()`、再接続の分岐で
   `refresher.refreshNow()`
@@ -195,7 +198,8 @@ final class MetadataRefresher {
   - `removeRecord` は、その alias を `unlistedNotified` から外す
 - 既存の `onMetadata`(ログイン時)と `onMetadataRefreshed` は、`instruments`/`knownCoins` の
   差し替えと再公開を 1 つの private メソッドで共有する
-- `stop()` は `refresher.close()` を呼ぶ(`assetContextFeed.close()` の隣)
+- `stop()` は `refresher.close()` を呼ぶ(`assetContextFeed.close()` の隣)。ログイン前に
+  停止した場合 `refresher` は未生成なので、null なら何もしない
 
 #### `Provider.ProductionSessionFactory`
 
