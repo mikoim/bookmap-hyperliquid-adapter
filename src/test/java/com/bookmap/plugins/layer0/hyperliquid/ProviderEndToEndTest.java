@@ -13,6 +13,7 @@ import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMetaParser;
 import com.bookmap.plugins.layer0.hyperliquid.session.AssetContextConnectorFactory;
 import com.bookmap.plugins.layer0.hyperliquid.session.HyperliquidSession;
 import com.bookmap.plugins.layer0.hyperliquid.session.HyperliquidSessionApi;
+import com.bookmap.plugins.layer0.hyperliquid.session.MetadataRequestFactory;
 import com.bookmap.plugins.layer0.hyperliquid.session.SessionSink;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -792,6 +793,18 @@ public class ProviderEndToEndTest {
                                   clock,
                                   dispatcher::submitControl,
                                   false);
+                            }
+                          },
+                          new MetadataRequestFactory() {
+                            @Override
+                            public MetadataRequest create(
+                                SourceProfile profile, MetadataRequest.Callback callback) {
+                              return new MetadataRequest(
+                                  transport,
+                                  new HyperliquidMetaParser(),
+                                  dispatcher::submitControl,
+                                  profile.infoUri(),
+                                  callback);
                             }
                           },
                           new Runnable() {

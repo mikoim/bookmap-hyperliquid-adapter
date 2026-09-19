@@ -9,6 +9,7 @@ import com.bookmap.plugins.layer0.hyperliquid.FakeHyperliquidTransport;
 import com.bookmap.plugins.layer0.hyperliquid.HyperliquidConnector;
 import com.bookmap.plugins.layer0.hyperliquid.HyperliquidEnvironment;
 import com.bookmap.plugins.layer0.hyperliquid.MarketDataSource;
+import com.bookmap.plugins.layer0.hyperliquid.MetadataRequest;
 import com.bookmap.plugins.layer0.hyperliquid.SourceProfile;
 import com.bookmap.plugins.layer0.hyperliquid.TestMetadata;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget;
@@ -267,6 +268,18 @@ public class HyperliquidSessionAssetContextTest {
               @Override
               public HyperliquidConnector create() {
                 throw new AssertionError("this fixture uses the Hyperliquid source only");
+              }
+            },
+            new MetadataRequestFactory() {
+              @Override
+              public MetadataRequest create(
+                  SourceProfile profile, MetadataRequest.Callback callback) {
+                return new MetadataRequest(
+                    transport,
+                    new HyperliquidMetaParser(),
+                    dispatcher::submitControl,
+                    profile.infoUri(),
+                    callback);
               }
             },
             HyperliquidSessionAssetContextTest::noop);

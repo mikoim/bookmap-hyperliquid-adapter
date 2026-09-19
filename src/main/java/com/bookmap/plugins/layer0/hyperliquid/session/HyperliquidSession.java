@@ -2,6 +2,7 @@ package com.bookmap.plugins.layer0.hyperliquid.session;
 
 import com.bookmap.plugins.layer0.hyperliquid.HyperliquidConnector;
 import com.bookmap.plugins.layer0.hyperliquid.MarketDataSource;
+import com.bookmap.plugins.layer0.hyperliquid.MetadataRequest;
 import com.bookmap.plugins.layer0.hyperliquid.OutboundMessage;
 import com.bookmap.plugins.layer0.hyperliquid.SourceProfile;
 import com.bookmap.plugins.layer0.hyperliquid.book.DeltaOrderBook;
@@ -45,7 +46,7 @@ import java.util.function.LongSupplier;
  * through the supplied dispatcher; frame parsing remains on the connector callback thread.
  */
 public final class HyperliquidSession
-    implements HyperliquidSessionApi, HyperliquidConnector.Listener {
+    implements HyperliquidSessionApi, HyperliquidConnector.Listener, MetadataRefresher.Listener {
 
   private static final long ACTIVATION_TIMEOUT_MILLIS = 10_000L;
   private static final long ACK_TIMEOUT_MILLIS = 10_000L;
@@ -66,6 +67,7 @@ public final class HyperliquidSession
       new BoundedTradeDeduplicator(TRADE_DEDUPLICATION_CAPACITY, TRADE_DEDUPLICATION_TTL_MILLIS);
   private final AssetContextStore assetContexts = new AssetContextStore();
   private final AssetContextConnectorFactory assetContextConnectorFactory;
+  private final MetadataRequestFactory metadataRequestFactory;
   private final Map<String, Instrument> instruments = new TreeMap<String, Instrument>();
   private final Map<String, SubscriptionRecord> records = new TreeMap<String, SubscriptionRecord>();
   private final Map<SubscriptionKey, CancellableScheduler.Cancellable> acknowledgementTasks =
@@ -91,6 +93,7 @@ public final class HyperliquidSession
   private long currentGeneration = -1L;
   private SourceProfile profile;
   private AssetContextFeed assetContextFeed;
+  private MetadataRefresher metadataRefresher;
 
   /**
    * Creates a session using explicitly supplied connector, scheduling, and state-lane boundaries.
@@ -104,6 +107,7 @@ public final class HyperliquidSession
       StateEventDispatcher dispatcher,
       SessionSink sink,
       AssetContextConnectorFactory assetContextConnectorFactory,
+      MetadataRequestFactory metadataRequestFactory,
       Runnable afterClose) {
     if (connector == null
         || parser == null
@@ -113,6 +117,7 @@ public final class HyperliquidSession
         || dispatcher == null
         || sink == null
         || assetContextConnectorFactory == null
+        || metadataRequestFactory == null
         || afterClose == null) {
       throw new IllegalArgumentException("session dependencies must not be null");
     }
@@ -125,6 +130,7 @@ public final class HyperliquidSession
     this.sink = sink;
     this.dataHealth = new DataHealthMonitor(scheduler, clock, dispatcher::submitControl, sink);
     this.assetContextConnectorFactory = assetContextConnectorFactory;
+    this.metadataRequestFactory = metadataRequestFactory;
     this.afterClose = afterClose;
     connector.setListener(this);
   }
@@ -227,15 +233,40 @@ public final class HyperliquidSession
     if (closed) {
       return;
     }
-    instruments.clear();
-    knownCoins.clear();
-    for (Instrument instrument : metadata) {
-      instruments.put(instrument.symbol(), instrument);
-      knownCoins.add(instrument.coin());
-    }
+    replaceInstruments(metadata);
     metadataReceived = true;
     sink.onKnownInstruments(new ArrayList<Instrument>(instruments.values()));
     startAssetContextFeedIfNeeded();
+  }
+
+  /** Receives a refreshed instrument list on the state lane. */
+  @Override
+  public void onMetadataRefreshed(List<Instrument> metadata) {
+    if (closed) {
+      return;
+    }
+    replaceInstruments(metadata);
+    sink.onKnownInstruments(new ArrayList<Instrument>(instruments.values()));
+  }
+
+  /** A failed refresh is not an incident: the previous list stays in force until the next one. */
+  @Override
+  public void onMetadataRefreshFailed(TransportFailure failure) {
+    if (!closed) {
+      sink.onDiagnostic("metadata refresh failed: " + failure.message());
+    }
+  }
+
+  /** Replaces the universe, carrying over every mark price already known. */
+  private void replaceInstruments(List<Instrument> metadata) {
+    instruments.clear();
+    knownCoins.clear();
+    for (Instrument instrument : metadata) {
+      instruments.put(
+          instrument.symbol(),
+          instrument.withReferencePrice(assetContexts.markPrice(instrument.coin())));
+      knownCoins.add(instrument.coin());
+    }
   }
 
   /**
@@ -287,12 +318,14 @@ public final class HyperliquidSession
     if (reconnecting) {
       connectionState = ConnectionState.RECONNECTING;
       recovering = true;
+      metadataRefresher.refreshNow();
       if (records.isEmpty()) {
         maybeRestore(generation);
       }
     } else {
       connectionState = ConnectionState.CONNECTED;
       connectedOnce = true;
+      metadataRefresher.start();
       reportLoginSuccessful();
     }
   }
@@ -425,6 +458,18 @@ public final class HyperliquidSession
       if (profile == null) {
         profile = newProfile;
         dataHealth.start(newProfile);
+        metadataRefresher =
+            new MetadataRefresher(
+                new MetadataRefresher.RequestFactory() {
+                  @Override
+                  public MetadataRequest create(MetadataRequest.Callback callback) {
+                    return metadataRequestFactory.create(profile, callback);
+                  }
+                },
+                scheduler,
+                clock,
+                dispatcher::submitControl,
+                this);
       }
       connectionState = ConnectionState.STARTING;
       connector.start(newProfile);
@@ -1050,6 +1095,10 @@ public final class HyperliquidSession
     if (assetContextFeed != null) {
       assetContextFeed.close();
       assetContextFeed = null;
+    }
+    if (metadataRefresher != null) {
+      metadataRefresher.close();
+      metadataRefresher = null;
     }
     connector.close();
     for (String coin : new ArrayList<String>(records.keySet())) {

@@ -15,6 +15,7 @@ import com.bookmap.plugins.layer0.hyperliquid.session.HyperliquidSession;
 import com.bookmap.plugins.layer0.hyperliquid.session.HyperliquidSessionApi;
 import com.bookmap.plugins.layer0.hyperliquid.session.LoginFailure;
 import com.bookmap.plugins.layer0.hyperliquid.session.MessageKind;
+import com.bookmap.plugins.layer0.hyperliquid.session.MetadataRequestFactory;
 import com.bookmap.plugins.layer0.hyperliquid.session.SessionSink;
 import com.bookmap.plugins.layer0.hyperliquid.transport.HyperliquidTransport;
 import com.bookmap.plugins.layer0.hyperliquid.transport.JettyHyperliquidTransport;
@@ -431,6 +432,14 @@ public final class Provider extends ExternalLiveBaseProvider {
                   clock,
                   dispatcher::submitControl,
                   false);
+      MetadataRequestFactory metadataRequestFactory =
+          (profile, callback) ->
+              new MetadataRequest(
+                  transport,
+                  new HyperliquidMetaParser(),
+                  dispatcher::submitControl,
+                  profile.infoUri(),
+                  callback);
       HyperliquidSession session =
           new HyperliquidSession(
               connector,
@@ -441,6 +450,7 @@ public final class Provider extends ExternalLiveBaseProvider {
               dispatcher,
               sink,
               assetContextConnectorFactory,
+              metadataRequestFactory,
               () -> {
                 scheduler.close();
                 stateExecutor.shutdown();
