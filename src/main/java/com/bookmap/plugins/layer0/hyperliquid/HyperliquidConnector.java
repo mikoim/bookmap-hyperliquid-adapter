@@ -8,7 +8,6 @@ import com.bookmap.plugins.layer0.hyperliquid.concurrent.CancellableScheduler;
 import com.bookmap.plugins.layer0.hyperliquid.model.Instrument;
 import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionKey;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMetaParser;
-import com.bookmap.plugins.layer0.hyperliquid.parse.ProtocolException;
 import com.bookmap.plugins.layer0.hyperliquid.transport.HyperliquidTransport;
 import com.bookmap.plugins.layer0.hyperliquid.transport.TransportFailure;
 import java.util.ArrayList;
@@ -26,7 +25,6 @@ import java.util.function.LongSupplier;
  */
 public final class HyperliquidConnector implements AutoCloseable {
 
-  private static final long METADATA_TIMEOUT_MILLIS = 10_000L;
   private static final long HANDSHAKE_TIMEOUT_MILLIS = 10_000L;
   private static final long HEARTBEAT_INTERVAL_MILLIS = 30_000L;
   private static final long PONG_TIMEOUT_MILLIS = 15_000L;
@@ -38,9 +36,6 @@ public final class HyperliquidConnector implements AutoCloseable {
   /** The single subscription frame that opens Hyperliquid's mark-price feed. */
   public static final String ASSET_CONTEXTS_SUBSCRIBE_JSON =
       "{\"method\":\"subscribe\",\"subscription\":{\"type\":\"fastAssetCtxs\"}}";
-
-  static final String PERP_METADATA_REQUEST_JSON = "{\"type\":\"allPerpMetas\"}";
-  static final String SPOT_METADATA_REQUEST_JSON = "{\"type\":\"spotMeta\"}";
 
   /** Receives lifecycle events emitted by the connector. */
   public interface Listener {
@@ -79,10 +74,7 @@ public final class HyperliquidConnector implements AutoCloseable {
 
   private Listener listener;
   private SourceProfile profile;
-  private HyperliquidTransport.Cancellable perpMetadataRequest;
-  private HyperliquidTransport.Cancellable spotMetadataRequest;
-  private List<Instrument> perpInstruments;
-  private List<Instrument> spotInstruments;
+  private MetadataRequest metadataRequest;
   private HyperliquidTransport.Cancellable connectRequest;
   private ConnectionPermit connectionPermit;
   private HyperliquidTransport.Socket socket;
@@ -344,32 +336,37 @@ public final class HyperliquidConnector implements AutoCloseable {
     profile = newProfile;
     try {
       transport.start();
-      perpMetadataRequest = postMetadata(PERP_METADATA_REQUEST_JSON, true);
-      spotMetadataRequest = postMetadata(SPOT_METADATA_REQUEST_JSON, false);
     } catch (Exception failure) {
-      cancelMetadataRequests();
       reportInitialFailure(TransportFailure.classify(failure, TransportFailure.Kind.NETWORK));
+      return;
     }
-  }
+    // The field is set before start(): a transport that throws reports its failure synchronously.
+    metadataRequest =
+        new MetadataRequest(
+            transport,
+            metaParser,
+            stateSubmitter,
+            profile.infoUri(),
+            new MetadataRequest.Callback() {
+              @Override
+              public void onInstruments(List<Instrument> instruments) {
+                metadataRequest = null;
+                if (closed) {
+                  return;
+                }
+                listener.onMetadata(instruments);
+                attemptConnection(true);
+              }
 
-  private HyperliquidTransport.Cancellable postMetadata(String requestJson, final boolean perp) {
-    return transport.postJson(
-        profile.infoUri(),
-        "application/json",
-        requestJson,
-        METADATA_TIMEOUT_MILLIS,
-        new HyperliquidTransport.HttpCallback() {
-          @Override
-          public void onComplete(final int statusCode, final String body, final Throwable failure) {
-            stateSubmitter.accept(
-                new Runnable() {
-                  @Override
-                  public void run() {
-                    completeMetadata(perp, statusCode, body, failure);
-                  }
-                });
-          }
-        });
+              @Override
+              public void onFailure(TransportFailure failure) {
+                metadataRequest = null;
+                if (!closed) {
+                  reportInitialFailure(failure);
+                }
+              }
+            });
+    metadataRequest.start();
   }
 
   private void startFeedOnlyOnStateLane(SourceProfile newProfile) {
@@ -388,63 +385,6 @@ public final class HyperliquidConnector implements AutoCloseable {
       return;
     }
     attemptConnection(true);
-  }
-
-  /**
-   * Both metadata responses must arrive before login proceeds. The first failure of either request
-   * fails login and cancels the other; a late callback for a request no longer tracked is ignored.
-   */
-  private void completeMetadata(boolean perp, int statusCode, String body, Throwable failure) {
-    if (closed || (perp ? perpMetadataRequest : spotMetadataRequest) == null) {
-      return;
-    }
-    if (perp) {
-      perpMetadataRequest = null;
-    } else {
-      spotMetadataRequest = null;
-    }
-    if (failure != null) {
-      failMetadata(TransportFailure.classify(failure, TransportFailure.Kind.NETWORK));
-      return;
-    }
-    if (statusCode < 200 || statusCode >= 300) {
-      failMetadata(
-          new TransportFailure(
-              TransportFailure.Kind.REMOTE, "metadata request returned HTTP " + statusCode, null));
-      return;
-    }
-    try {
-      if (perp) {
-        perpInstruments = metaParser.parseAllPerpMetas(body);
-      } else {
-        spotInstruments = metaParser.parseSpotMeta(body);
-      }
-      if (perpInstruments == null || spotInstruments == null) {
-        return;
-      }
-      List<Instrument> combined = HyperliquidMetaParser.combine(perpInstruments, spotInstruments);
-      perpInstruments = null;
-      spotInstruments = null;
-      listener.onMetadata(combined);
-    } catch (ProtocolException failureException) {
-      failMetadata(TransportFailure.classify(failureException, TransportFailure.Kind.PROTOCOL));
-      return;
-    }
-    attemptConnection(true);
-  }
-
-  private void failMetadata(TransportFailure failure) {
-    cancelMetadataRequests();
-    perpInstruments = null;
-    spotInstruments = null;
-    reportInitialFailure(failure);
-  }
-
-  private void cancelMetadataRequests() {
-    cancel(perpMetadataRequest);
-    perpMetadataRequest = null;
-    cancel(spotMetadataRequest);
-    spotMetadataRequest = null;
   }
 
   private void attemptConnection(final boolean initial) {
@@ -987,7 +927,10 @@ public final class HyperliquidConnector implements AutoCloseable {
       return;
     }
     closed = true;
-    cancelMetadataRequests();
+    if (metadataRequest != null) {
+      metadataRequest.cancel();
+      metadataRequest = null;
+    }
     cancel(connectionRetry);
     connectionRetry = null;
     disconnectCurrent(protocolFailure("connector closed", null), false);
