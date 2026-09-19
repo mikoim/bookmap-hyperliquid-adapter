@@ -1452,13 +1452,13 @@ public class HyperliquidSessionMetadataRefreshTest {
   }
 
   static final class Fixture {
-    final ManualExecutor executor = new ManualExecutor();
-    final Clock clock = new Clock();
-    final Scheduler scheduler = new Scheduler(clock);
-    final HyperliquidProcessBudget budget = budget();
-    final FakeHyperliquidTransport transport = new FakeHyperliquidTransport();
-    final RecordingSessionSink sink = new RecordingSessionSink();
-    final StateEventDispatcher dispatcher =
+    private final ManualExecutor executor = new ManualExecutor();
+    private final Clock clock = new Clock();
+    private final Scheduler scheduler = new Scheduler(clock);
+    private final HyperliquidProcessBudget budget = budget();
+    private final FakeHyperliquidTransport transport = new FakeHyperliquidTransport();
+    private final RecordingSessionSink sink = new RecordingSessionSink();
+    private final StateEventDispatcher dispatcher =
         new StateEventDispatcher(
             executor,
             4_096,
@@ -1468,10 +1468,10 @@ public class HyperliquidSessionMetadataRefreshTest {
                 // overflow is not exercised here
               }
             });
-    final HyperliquidConnector connector =
+    private final HyperliquidConnector connector =
         new HyperliquidConnector(
             transport, new HyperliquidMetaParser(), budget, scheduler, clock, dispatcher::submitControl);
-    final HyperliquidSession session =
+    private final HyperliquidSession session =
         new HyperliquidSession(
             connector,
             new HyperliquidMessageParser(),
@@ -1504,7 +1504,7 @@ public class HyperliquidSessionMetadataRefreshTest {
                 // no-op
               }
             });
-    long generation = 1L;
+    private long generation = 1L;
 
     void login(String... symbols) {
       session.login(SourceProfile.of(MarketDataSource.HYPERLIQUID, HyperliquidEnvironment.MAINNET));
@@ -1598,7 +1598,7 @@ public class HyperliquidSessionMetadataRefreshTest {
   }
 
   static final class Clock implements LongSupplier {
-    long now;
+    private long now;
 
     @Override
     public long getAsLong() {
@@ -2074,7 +2074,7 @@ time again. This case does not advance after subscribing, so it needs no pong.
 ```java
   @Test
   public void instrumentListedDuringTheSessionBecomesSubscribable() {
-    Fixture fixture = new Fixture();
+    Fixture fixture = new Fixture(budget(2, 20, 50, 2));
     fixture.loginWithMetadata("BTC");
     assertFalse(knownSymbols(fixture).contains("NEW"));
 
