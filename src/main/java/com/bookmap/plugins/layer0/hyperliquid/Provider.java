@@ -419,7 +419,12 @@ public final class Provider extends ExternalLiveBaseProvider {
       HyperliquidTransport transport = new JettyHyperliquidTransport();
       AtomicReference<HyperliquidSession> sessionRef = new AtomicReference<HyperliquidSession>();
       StateEventDispatcher dispatcher =
-          new StateEventDispatcher(stateExecutor, 4096, () -> sessionRef.get().onMarketOverflow());
+          new StateEventDispatcher(
+              stateExecutor,
+              4096,
+              () -> sessionRef.get().onMarketOverflow(),
+              failure ->
+                  Log.error("Hyperliquid state task failed; the session continues", failure));
       HyperliquidConnector connector =
           new HyperliquidConnector(
               transport,

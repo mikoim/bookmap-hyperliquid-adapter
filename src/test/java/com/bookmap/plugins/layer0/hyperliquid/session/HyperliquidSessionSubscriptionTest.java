@@ -10,6 +10,7 @@ import com.bookmap.plugins.layer0.hyperliquid.HyperliquidEnvironment;
 import com.bookmap.plugins.layer0.hyperliquid.MarketDataSource;
 import com.bookmap.plugins.layer0.hyperliquid.MetadataRequest;
 import com.bookmap.plugins.layer0.hyperliquid.SourceProfile;
+import com.bookmap.plugins.layer0.hyperliquid.TaskFailures;
 import com.bookmap.plugins.layer0.hyperliquid.TestMetadata;
 import com.bookmap.plugins.layer0.hyperliquid.book.OrderBookSnapshotDiff;
 import com.bookmap.plugins.layer0.hyperliquid.book.PriceBucketer;
@@ -831,7 +832,8 @@ public class HyperliquidSessionSubscriptionTest {
     private final HyperliquidProcessBudget budget = budget();
     private final FakeHyperliquidTransport transport = new FakeHyperliquidTransport();
     private final StateEventDispatcher dispatcher =
-        new StateEventDispatcher(executor, 4_096, HyperliquidSessionSubscriptionTest::noop);
+        new StateEventDispatcher(
+            executor, 4_096, HyperliquidSessionSubscriptionTest::noop, TaskFailures::rethrow);
     private final HyperliquidConnector connector =
         new HyperliquidConnector(
             transport,

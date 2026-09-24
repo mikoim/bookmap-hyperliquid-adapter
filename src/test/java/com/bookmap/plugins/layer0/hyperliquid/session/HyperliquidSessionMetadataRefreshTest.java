@@ -9,6 +9,7 @@ import com.bookmap.plugins.layer0.hyperliquid.HyperliquidEnvironment;
 import com.bookmap.plugins.layer0.hyperliquid.MarketDataSource;
 import com.bookmap.plugins.layer0.hyperliquid.MetadataRequest;
 import com.bookmap.plugins.layer0.hyperliquid.SourceProfile;
+import com.bookmap.plugins.layer0.hyperliquid.TaskFailures;
 import com.bookmap.plugins.layer0.hyperliquid.TestMetadata;
 import com.bookmap.plugins.layer0.hyperliquid.budget.HyperliquidProcessBudget;
 import com.bookmap.plugins.layer0.hyperliquid.concurrent.CancellableScheduler;
@@ -282,7 +283,8 @@ public class HyperliquidSessionMetadataRefreshTest {
               public void run() {
                 // overflow is not exercised here
               }
-            });
+            },
+            TaskFailures::rethrow);
     private final HyperliquidConnector connector =
         new HyperliquidConnector(
             transport,

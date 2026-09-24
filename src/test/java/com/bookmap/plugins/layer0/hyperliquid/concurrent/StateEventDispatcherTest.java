@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import com.bookmap.plugins.layer0.hyperliquid.TaskFailures;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -22,7 +23,8 @@ public class StateEventDispatcherTest {
     List<String> calls = new ArrayList<String>();
     AtomicInteger overflowCalls = new AtomicInteger();
     StateEventDispatcher dispatcher =
-        new StateEventDispatcher(executor, 3, () -> overflowCalls.incrementAndGet());
+        new StateEventDispatcher(
+            executor, 3, () -> overflowCalls.incrementAndGet(), TaskFailures::rethrow);
 
     assertTrue(dispatcher.submitMarketFrame(2, () -> calls.add("frame-a")));
     assertFalse(dispatcher.submitMarketFrame(2, () -> calls.add("frame-b")));
@@ -37,7 +39,8 @@ public class StateEventDispatcherTest {
   public void controlRunsBeforeQueuedMarketAndIsNeverRejected() {
     ManualExecutor executor = new ManualExecutor();
     List<String> calls = new ArrayList<String>();
-    StateEventDispatcher dispatcher = new StateEventDispatcher(executor, 1, () -> calls.size());
+    StateEventDispatcher dispatcher =
+        new StateEventDispatcher(executor, 1, () -> calls.size(), TaskFailures::rethrow);
 
     assertTrue(dispatcher.submitMarketFrame(1, () -> calls.add("market")));
     dispatcher.submitControl(() -> calls.add("control"));
@@ -51,7 +54,8 @@ public class StateEventDispatcherTest {
   public void admitsExactlyTheConfiguredMarketCapacity() {
     ManualExecutor executor = new ManualExecutor();
     AtomicInteger calls = new AtomicInteger();
-    StateEventDispatcher dispatcher = new StateEventDispatcher(executor, 4_096, () -> calls.get());
+    StateEventDispatcher dispatcher =
+        new StateEventDispatcher(executor, 4_096, () -> calls.get(), TaskFailures::rethrow);
 
     assertTrue(dispatcher.submitMarketFrame(4_096, () -> calls.incrementAndGet()));
     assertFalse(dispatcher.submitMarketFrame(1, () -> calls.incrementAndGet()));
@@ -65,7 +69,8 @@ public class StateEventDispatcherTest {
   public void rejectsOneFrameLargerThanCapacityWithoutConsumingCapacity() {
     ManualExecutor executor = new ManualExecutor();
     List<String> calls = new ArrayList<String>();
-    StateEventDispatcher dispatcher = new StateEventDispatcher(executor, 3, () -> calls.size());
+    StateEventDispatcher dispatcher =
+        new StateEventDispatcher(executor, 3, () -> calls.size(), TaskFailures::rethrow);
 
     assertFalse(dispatcher.submitMarketFrame(4, () -> calls.add("oversized")));
     assertTrue(dispatcher.submitMarketFrame(3, () -> calls.add("fits")));
@@ -80,7 +85,8 @@ public class StateEventDispatcherTest {
     ManualExecutor executor = new ManualExecutor();
     AtomicInteger overflowCalls = new AtomicInteger();
     StateEventDispatcher dispatcher =
-        new StateEventDispatcher(executor, 1, () -> overflowCalls.incrementAndGet());
+        new StateEventDispatcher(
+            executor, 1, () -> overflowCalls.incrementAndGet(), TaskFailures::rethrow);
 
     assertFalse(dispatcher.submitMarketFrame(2, () -> overflowCalls.get()));
     assertFalse(dispatcher.submitMarketFrame(2, () -> overflowCalls.get()));
@@ -99,7 +105,8 @@ public class StateEventDispatcherTest {
   public void discardMarketFramesRetainsControlsAndReleasesTheirCapacity() {
     ManualExecutor executor = new ManualExecutor();
     List<String> calls = new ArrayList<String>();
-    StateEventDispatcher dispatcher = new StateEventDispatcher(executor, 2, () -> calls.size());
+    StateEventDispatcher dispatcher =
+        new StateEventDispatcher(executor, 2, () -> calls.size(), TaskFailures::rethrow);
 
     assertTrue(dispatcher.submitMarketFrame(2, () -> calls.add("discarded")));
     dispatcher.submitControl(() -> calls.add("control"));
@@ -112,10 +119,33 @@ public class StateEventDispatcherTest {
   }
 
   @Test
+  public void aThrowingTaskIsReportedAndLaterWorkStillRuns() {
+    ManualExecutor executor = new ManualExecutor();
+    List<String> calls = new ArrayList<String>();
+    List<Throwable> failures = new ArrayList<Throwable>();
+    StateEventDispatcher dispatcher =
+        new StateEventDispatcher(executor, 4, () -> calls.size(), failures::add);
+    RuntimeException boom = new IllegalStateException("boom");
+
+    dispatcher.submitControl(
+        () -> {
+          throw boom;
+        });
+    dispatcher.submitControl(() -> calls.add("after-control"));
+    executor.drain();
+    dispatcher.submitMarketFrame(1, () -> calls.add("after-market"));
+    executor.drain();
+
+    assertEquals(Arrays.asList("after-control", "after-market"), calls);
+    assertEquals(Collections.singletonList(boom), failures);
+  }
+
+  @Test
   public void closeIsIdempotentAndClearsQueuedWork() {
     ManualExecutor executor = new ManualExecutor();
     List<String> calls = new ArrayList<String>();
-    StateEventDispatcher dispatcher = new StateEventDispatcher(executor, 1, () -> calls.size());
+    StateEventDispatcher dispatcher =
+        new StateEventDispatcher(executor, 1, () -> calls.size(), TaskFailures::rethrow);
 
     dispatcher.submitControl(() -> calls.add("control"));
     assertTrue(dispatcher.submitMarketFrame(1, () -> calls.add("market")));

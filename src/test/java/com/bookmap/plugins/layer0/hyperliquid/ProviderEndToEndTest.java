@@ -816,7 +816,8 @@ public class ProviderEndToEndTest {
                     session.onMarketOverflow();
                   }
                 }
-              });
+              },
+              TaskFailures::rethrow);
       provider =
           new Provider(
               new HyperliquidSessionFactory() {

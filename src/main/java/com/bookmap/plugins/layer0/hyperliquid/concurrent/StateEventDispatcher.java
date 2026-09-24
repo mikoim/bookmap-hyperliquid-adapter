@@ -2,6 +2,7 @@ package com.bookmap.plugins.layer0.hyperliquid.concurrent;
 
 import java.util.ArrayDeque;
 import java.util.concurrent.Executor;
+import java.util.function.Consumer;
 
 /** Serializes state work while bounding complete market-data frames independently from controls. */
 public final class StateEventDispatcher implements AutoCloseable {
@@ -10,6 +11,7 @@ public final class StateEventDispatcher implements AutoCloseable {
   private final Executor executor;
   private final int marketCapacity;
   private final Runnable onFirstOverflow;
+  private final Consumer<Throwable> onTaskFailure;
   private final ArrayDeque<Runnable> controls = new ArrayDeque<Runnable>();
   private final ArrayDeque<MarketTask> market = new ArrayDeque<MarketTask>();
   private final Runnable drainTask =
@@ -25,13 +27,24 @@ public final class StateEventDispatcher implements AutoCloseable {
   private boolean overflowSignalled;
   private boolean closed;
 
-  /** Creates a dispatcher with a bounded market lane and an unbounded priority control lane. */
-  public StateEventDispatcher(Executor executor, int marketCapacity, Runnable onFirstOverflow) {
+  /**
+   * Creates a dispatcher with a bounded market lane and an unbounded priority control lane. A task
+   * that throws is reported to {@code onTaskFailure} and never stops the lane: the remaining work
+   * still runs.
+   */
+  public StateEventDispatcher(
+      Executor executor,
+      int marketCapacity,
+      Runnable onFirstOverflow,
+      Consumer<Throwable> onTaskFailure) {
     if (executor == null) {
       throw new NullPointerException("executor");
     }
     if (onFirstOverflow == null) {
       throw new NullPointerException("onFirstOverflow");
+    }
+    if (onTaskFailure == null) {
+      throw new NullPointerException("onTaskFailure");
     }
     if (marketCapacity <= 0) {
       throw new IllegalArgumentException("marketCapacity must be positive");
@@ -39,6 +52,7 @@ public final class StateEventDispatcher implements AutoCloseable {
     this.executor = executor;
     this.marketCapacity = marketCapacity;
     this.onFirstOverflow = onFirstOverflow;
+    this.onTaskFailure = onTaskFailure;
   }
 
   /** Queues control work with priority over all queued market frames. */
@@ -139,7 +153,11 @@ public final class StateEventDispatcher implements AutoCloseable {
       if (next == null) {
         return;
       }
-      next.run();
+      try {
+        next.run();
+      } catch (RuntimeException failure) {
+        onTaskFailure.accept(failure);
+      }
     }
   }
 
