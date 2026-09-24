@@ -15,6 +15,7 @@ import org.eclipse.jetty.websocket.api.RemoteEndpoint;
 import org.eclipse.jetty.websocket.api.Session;
 import org.eclipse.jetty.websocket.api.WebSocketPolicy;
 import org.eclipse.jetty.websocket.api.WriteCallback;
+import org.eclipse.jetty.websocket.api.annotations.WebSocket;
 import org.eclipse.jetty.websocket.common.events.annotated.CallableMethod;
 import org.junit.Test;
 
@@ -182,6 +183,18 @@ public class JettyHyperliquidTransportContractTest {
     assertEquals(1_048_576, policy.getMaxBinaryMessageSize());
     assertEquals(1_048_576, JettyHyperliquidTransport.MAX_WEB_SOCKET_MESSAGE_BYTES);
     assertEquals(4_194_304, JettyHyperliquidTransport.MAX_HTTP_RESPONSE_BYTES);
+  }
+
+  /**
+   * Jetty applies a positive {@code @WebSocket(maxTextMessageSize)} over the client policy, so the
+   * annotation must carry the same cap or a fragmented message would be unbounded.
+   */
+  @Test
+  public void socketAnnotationKeepsTheMessageCap() {
+    WebSocket annotation = SocketAdapter.class.getAnnotation(WebSocket.class);
+
+    assertEquals(
+        JettyHyperliquidTransport.MAX_WEB_SOCKET_MESSAGE_BYTES, annotation.maxTextMessageSize());
   }
 
   /** Jetty 9.3 leaves host-name verification off; an engine it builds must still ask for it. */

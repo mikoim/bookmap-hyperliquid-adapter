@@ -9,7 +9,7 @@ import org.eclipse.jetty.websocket.api.annotations.OnWebSocketMessage;
 import org.eclipse.jetty.websocket.api.annotations.WebSocket;
 
 /** Forwards Jetty annotated socket events to the connector transport callback. */
-@WebSocket(maxTextMessageSize = Integer.MAX_VALUE)
+@WebSocket(maxTextMessageSize = JettyHyperliquidTransport.MAX_WEB_SOCKET_MESSAGE_BYTES)
 public final class SocketAdapter {
 
   private final HyperliquidTransport.SocketCallback callback;
