@@ -52,7 +52,7 @@ public final class HyperliquidConnector implements AutoCloseable {
     /** Reports a raw immutable WebSocket frame on the transport callback thread. */
     void onFrame(long generation, String json);
 
-    /** Reports a successful outbound frame acknowledgment. */
+    /** Reports a successful outbound frame write, on the serialized state lane. */
     void onFrameSent(long generation, OutboundMessage message, long sentAtMillis);
 
     /** Reports a disconnected generation. */

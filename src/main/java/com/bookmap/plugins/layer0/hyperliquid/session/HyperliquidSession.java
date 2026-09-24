@@ -421,26 +421,22 @@ public final class HyperliquidSession
 
   /**
    * Records the successful send-time needed to reject unsolicited subscription acknowledgements.
+   * The connector calls this on the state lane, and the record is updated right here: queuing
+   * another task would let an acknowledgement already waiting in the queue run first and be lost.
    */
   @Override
-  public void onFrameSent(final long generation, final OutboundMessage message, long sentAtMillis) {
-    dispatcher.submitControl(
-        new Runnable() {
-          @Override
-          public void run() {
-            if (closed
-                || generation != currentGeneration
-                || generationInvalidated
-                || message.kind() != OutboundMessage.Kind.SUBSCRIBE) {
-              return;
-            }
-            SubscriptionRecord record = recordForKey(message.subscription());
-            if (record != null && record.state() != SubscriptionRecord.State.REMOVED) {
-              record.markSent(generation, message.subscription());
-              scheduleAcknowledgementTimeout(generation, message, sentAtMillis);
-            }
-          }
-        });
+  public void onFrameSent(long generation, OutboundMessage message, long sentAtMillis) {
+    if (closed
+        || generation != currentGeneration
+        || generationInvalidated
+        || message.kind() != OutboundMessage.Kind.SUBSCRIBE) {
+      return;
+    }
+    SubscriptionRecord record = recordForKey(message.subscription());
+    if (record != null && record.state() != SubscriptionRecord.State.REMOVED) {
+      record.markSent(generation, message.subscription());
+      scheduleAcknowledgementTimeout(generation, message, sentAtMillis);
+    }
   }
 
   /** Receives a disconnected connector generation on the serialized state lane. */

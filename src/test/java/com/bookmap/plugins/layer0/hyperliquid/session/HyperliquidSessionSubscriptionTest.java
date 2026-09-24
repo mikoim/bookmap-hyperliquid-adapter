@@ -215,6 +215,27 @@ public class HyperliquidSessionSubscriptionTest {
     }
   }
 
+  /**
+   * A send completes and its acknowledgement arrives while the state lane is still busy, so both
+   * are queued before either runs. The acknowledgement must still count.
+   */
+  @Test
+  public void ackQueuedRightBehindTheSendCompletionStillActivates() {
+    Fixture fixture = new Fixture();
+    fixture.login();
+    fixture.session.subscribe("BTC", "", "PERPETUAL");
+    fixture.drain();
+
+    fixture.transport.socket().succeedNextSend();
+    fixture.transport.socket().succeedNextSend();
+    fixture.receive(ack(SubscriptionType.L2_BOOK));
+    fixture.receive(ack(SubscriptionType.TRADES));
+    fixture.receive(book("BTC", 1L, "100.000", "1"));
+    fixture.drain();
+
+    assertEquals(Arrays.asList("BTC"), fixture.sink.addedAliases());
+  }
+
   @Test
   public void unsolicitedAckBeforeSendDoesNotOpenActivationGate() {
     Fixture fixture = new Fixture();
