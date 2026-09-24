@@ -237,20 +237,44 @@ public class HyperliquidMessageParserTest {
   }
 
   @Test
-  public void returnsTargetableSubscriptionErrorOnlyForStructuredExactSubscription() {
+  public void targetsStructuredErrorAtItsExactSubscription() {
     ParsedFrame targetable =
         parser.parse(
             "{\"channel\":\"error\",\"data\":{\"subscription\":{"
                 + "\"type\":\"trades\",\"coin\":\"BTC\"}}}");
-    ParsedFrame unstructured =
-        parser.parse("{\"channel\":\"error\",\"data\":\"failed to subscribe BTC trades\"}");
 
     assertEquals(ControlEvent.Kind.SUBSCRIPTION_ERROR, targetable.controlEvents().get(0).kind());
     assertEquals(
         new SubscriptionKey("BTC", SubscriptionType.TRADES),
         targetable.controlEvents().get(0).target());
-    assertEquals(ControlEvent.Kind.SUBSCRIPTION_ERROR, unstructured.controlEvents().get(0).kind());
-    assertNull(unstructured.controlEvents().get(0).target());
+  }
+
+  /** Hyperliquid rejects a subscription with a string that embeds the rejected subscription. */
+  @Test
+  public void targetsInvalidSubscriptionStringAtTheEmbeddedSubscription() {
+    ParsedFrame frame =
+        parser.parse(
+            "{\"channel\":\"error\",\"data\":\"Invalid subscription {\\\"type\\\":"
+                + "\\\"l2Book\\\",\\\"coin\\\":\\\"BTC\\\",\\\"nSigFigs\\\":5}\"}");
+
+    assertEquals(ParsedFrame.Disposition.ACCEPTED, frame.disposition());
+    assertEquals(1, frame.controlEvents().size());
+    assertEquals(ControlEvent.Kind.SUBSCRIPTION_ERROR, frame.controlEvents().get(0).kind());
+    assertEquals(
+        new SubscriptionKey("BTC", SubscriptionType.L2_BOOK),
+        frame.controlEvents().get(0).target());
+  }
+
+  /** An error the adapter cannot tie to one subscription stays untargeted and is diagnosed. */
+  @Test
+  public void reportsUnstructuredErrorAsUntargetedEventWithDiagnostic() {
+    ParsedFrame frame =
+        parser.parse("{\"channel\":\"error\",\"data\":\"failed to subscribe BTC trades\"}");
+
+    assertEquals(ControlEvent.Kind.SUBSCRIPTION_ERROR, frame.controlEvents().get(0).kind());
+    assertNull(frame.controlEvents().get(0).target());
+    assertEquals(1, frame.diagnostics().size());
+    assertTrue(frame.diagnostics().get(0), frame.diagnostics().get(0).contains("BTC trades"));
   }
 
   @Test
@@ -264,11 +288,10 @@ public class HyperliquidMessageParserTest {
             "{\"channel\":\"error\",\"data\":{\"subscription\":{"
                 + "\"type\":\"candle\",\"coin\":\"BTC\"}}}");
 
-    assertEquals(ControlEvent.Kind.SUBSCRIPTION_ERROR, extraField.controlEvents().get(0).kind());
     assertNull(extraField.controlEvents().get(0).target());
-    assertEquals(
-        ControlEvent.Kind.SUBSCRIPTION_ERROR, unsupportedType.controlEvents().get(0).kind());
+    assertEquals(1, extraField.diagnostics().size());
     assertNull(unsupportedType.controlEvents().get(0).target());
+    assertEquals(1, unsupportedType.diagnostics().size());
   }
 
   @Test
@@ -435,13 +458,15 @@ public class HyperliquidMessageParserTest {
     assertTrue(frame.diagnostics().get(0), frame.diagnostics().get(0).contains("fastAssetCtxs"));
   }
 
-  /** Keeps reporting an untargeted non-feed error as a subscription error. */
+  /** A string error that embeds no subscription stays untargeted and is diagnosed. */
   @Test
-  public void keepsUntargetedErrorAsSubscriptionError() {
+  public void reportsUntargetedStringErrorWithDiagnostic() {
     ParsedFrame frame = parser.parse("{\"channel\":\"error\",\"data\":\"Already subscribed\"}");
 
-    assertEquals(ParsedFrame.Disposition.ACCEPTED, frame.disposition());
-    assertEquals(1, frame.controlEvents().size());
     assertEquals(ControlEvent.Kind.SUBSCRIPTION_ERROR, frame.controlEvents().get(0).kind());
+    assertNull(frame.controlEvents().get(0).target());
+    assertEquals(1, frame.diagnostics().size());
+    assertTrue(
+        frame.diagnostics().get(0), frame.diagnostics().get(0).contains("Already subscribed"));
   }
 }

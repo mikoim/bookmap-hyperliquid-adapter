@@ -204,28 +204,61 @@ public final class HyperliquidMessageParser {
         && "fastAssetCtxs".equals(type.getAsString());
   }
 
+  /**
+   * Turns an error frame into a subscription error. The exchange rejects a subscription with a
+   * string such as {@code Invalid subscription {"type":"l2Book","coin":"BTC"}}; that embedded
+   * subscription, or a structured {@code data.subscription} object, becomes the event's target. An
+   * error naming no market-data subscription is an untargeted event plus a diagnostic; the receiver
+   * decides what an untargeted error means on its connection.
+   */
   private ParsedFrame parseError(JsonObject object) {
-    SubscriptionKey target = null;
     JsonElement data = object.get("data");
-    if (data != null && data.isJsonObject()) {
-      JsonElement subscription = data.getAsJsonObject().get("subscription");
-      if (subscription != null && subscription.isJsonObject()) {
-        try {
-          target = parseSubscription(subscription.getAsJsonObject());
-        } catch (ProtocolException ignored) {
-          target = null;
-        }
-      }
-    }
-    if (target == null && data != null && data.toString().contains("fastAssetCtxs")) {
+    if (data != null && data.toString().contains("fastAssetCtxs")) {
       return ParsedFrame.ignored(
           Collections.singletonList("fastAssetCtxs subscription rejected: " + data));
     }
+    SubscriptionKey target = errorTarget(data);
+    List<String> diagnostics =
+        target == null
+            ? Collections.singletonList("error not attributable to one subscription: " + data)
+            : Collections.<String>emptyList();
     ControlEvent event = new ControlEvent(ControlEvent.Kind.SUBSCRIPTION_ERROR, target);
     return ParsedFrame.accepted(
-        Collections.<MarketDataEvent>emptyList(),
-        Collections.singletonList(event),
-        Collections.<String>emptyList());
+        Collections.<MarketDataEvent>emptyList(), Collections.singletonList(event), diagnostics);
+  }
+
+  private SubscriptionKey errorTarget(JsonElement data) {
+    if (data == null) {
+      return null;
+    }
+    JsonElement subscription = null;
+    if (data.isJsonObject()) {
+      subscription = data.getAsJsonObject().get("subscription");
+    } else if (data.isJsonPrimitive() && data.getAsJsonPrimitive().isString()) {
+      subscription = embeddedJson(data.getAsString());
+    }
+    if (subscription == null || !subscription.isJsonObject()) {
+      return null;
+    }
+    try {
+      return parseSubscription(subscription.getAsJsonObject());
+    } catch (ProtocolException ignored) {
+      return null;
+    }
+  }
+
+  /** Returns the JSON object embedded in an error string, or null when there is none. */
+  private static JsonElement embeddedJson(String message) {
+    int start = message.indexOf('{');
+    int end = message.lastIndexOf('}');
+    if (start < 0 || end <= start) {
+      return null;
+    }
+    try {
+      return new JsonParser().parse(message.substring(start, end + 1));
+    } catch (RuntimeException malformed) {
+      return null;
+    }
   }
 
   private ParsedFrame parseAssetContexts(JsonObject object) throws ProtocolException {

@@ -725,9 +725,14 @@ public final class HyperliquidSession
   }
 
   private void handleSubscriptionError(SubscriptionKey target) {
+    if (target == null) {
+      // The parser already reported the unattributable error as a diagnostic; without a target
+      // there is nothing to remove, and one rejected frame must never end the whole session.
+      return;
+    }
     SubscriptionRecord record = recordForKey(target);
     if (record == null) {
-      stop(StopCause.FATAL);
+      sink.onDiagnostic("subscription error for unsubscribed coin: " + target.coin());
       return;
     }
     removeRecord(record.coin(), RemovalCause.REJECTION, "Hyperliquid rejected subscription");

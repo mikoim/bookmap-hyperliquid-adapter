@@ -350,7 +350,7 @@ public class ProviderEndToEndTest {
   }
 
   @Test
-  public void targetedRejectionRemovesOnlyOneAliasAndUntargetedErrorIsFatal() {
+  public void targetedRejectionRemovesOnlyOneAliasAndUntargetedErrorKeepsTheSession() {
     Fixture fixture = new Fixture(budget(2, 20, 50, 4));
     fixture.loginWithMetadata("BTC", "ETH");
     fixture.subscribe("BTC");
@@ -375,7 +375,8 @@ public class ProviderEndToEndTest {
 
     fixture.error(null);
     fixture.drain();
-    assertTrue(fixture.admin.connectionLostFatal);
+    assertFalse(fixture.admin.connectionLostFatal);
+    assertTrue(fixture.instruments.added.contains("ETH"));
     fixture.provider.sendOrder(new EmptyOrder());
     fixture.provider.updateOrder(new OrderUpdateParameters("id"));
     assertEquals(2, fixture.admin.orderFailures);

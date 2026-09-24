@@ -434,17 +434,26 @@ public class HyperliquidSessionSubscriptionTest {
   }
 
   @Test
-  public void untargetableSubscriptionErrorUsesFatalLifecyclePath() {
+  public void untargetableErrorIsOnlyADiagnostic() {
     Fixture fixture = new Fixture();
     fixture.login();
     fixture.receive(error(null));
     fixture.drain();
-    assertFalse(fixture.sink.events().contains("login-failed:FATAL"));
-    assertEquals(1, countContaining(fixture.sink.events(), "connection-lost:FATAL"));
-    int eventCount = fixture.sink.events().size();
-    fixture.receive(error(null));
+    assertEquals(0, countContaining(fixture.sink.events(), "connection-lost"));
+    assertEquals(1, countContaining(fixture.sink.events(), "diagnostic:"));
+  }
+
+  @Test
+  public void errorForAnUnsubscribedCoinIsOnlyADiagnostic() {
+    Fixture fixture = new Fixture();
+    fixture.login();
+    fixture.session.subscribe("BTC", "", "PERPETUAL");
     fixture.drain();
-    assertEquals(eventCount, fixture.sink.events().size());
+    fixture.receive(errorFor("ZZZ", SubscriptionType.L2_BOOK));
+    fixture.drain();
+    assertEquals(0, countContaining(fixture.sink.events(), "connection-lost"));
+    assertTrue(fixture.sink.removedAliases().isEmpty());
+    assertEquals(1, countContaining(fixture.sink.events(), "diagnostic:"));
   }
 
   @Test

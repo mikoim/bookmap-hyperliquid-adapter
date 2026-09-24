@@ -105,8 +105,8 @@ final class AssetContextFeed implements HyperliquidConnector.Listener, AutoClose
       } else if (event.kind() == ControlEvent.Kind.ASSET_CONTEXTS) {
         submit(generation, event.markPrices());
       } else if (event.kind() == ControlEvent.Kind.SUBSCRIPTION_ERROR) {
-        // A rejection freezes mark prices and reports a health warning; it never reaches
-        // the market-data path's handleSubscriptionError, which treats an unknown target as fatal.
+        // Only fastAssetCtxs is subscribed on this connection, so any error here is its rejection:
+        // mark prices freeze and a health warning is reported once.
         reportOnceOnStateLane(generation, "asset-context feed subscription rejected");
       }
     }
