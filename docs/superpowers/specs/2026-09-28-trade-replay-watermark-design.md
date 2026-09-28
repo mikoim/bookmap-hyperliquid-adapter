@@ -1,7 +1,7 @@
 # 購読時の約定再送の扱い(約定の水位線) — 設計書
 
 - 作成日: 2026-09-28
-- 状態: spec-review READY、人間の承認待ち
+- 状態: spec-review READY、人間の承認済み
 - 起点: ローカル main `6725969`(購読送信の記録順の修正)
 - 対象: bookmap-hyperliquid-adapter(Bookmap Layer 0 マーケットデータアダプター)
 
