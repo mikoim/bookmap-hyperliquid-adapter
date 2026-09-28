@@ -34,6 +34,7 @@ import java.math.BigDecimal;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -847,7 +848,7 @@ public final class HyperliquidSession
     }
     SubscriptionRecord publishing = null;
     List<PendingTrade> publishable = new ArrayList<PendingTrade>();
-    int stale = 0;
+    Map<String, Integer> staleByAlias = null;
     for (TradeEvent trade : trades) {
       SubscriptionRecord record = records.get(trade.coin());
       if (record == null || record.state() == SubscriptionRecord.State.REMOVED) {
@@ -867,12 +868,12 @@ public final class HyperliquidSession
         if (admits(record, converted)) {
           bufferTrade(record, converted, "recovery");
         } else {
-          stale++;
+          staleByAlias = countStale(staleByAlias, record.alias());
         }
         continue;
       }
       if (!admit(record, converted)) {
-        stale++;
+        staleByAlias = countStale(staleByAlias, record.alias());
         continue;
       }
       if (publishing != record) {
@@ -883,7 +884,20 @@ public final class HyperliquidSession
       publishable.add(converted);
     }
     publishTrades(publishing, publishable);
-    reportStaleTrades(stale, "");
+    if (staleByAlias != null) {
+      for (Map.Entry<String, Integer> stale : staleByAlias.entrySet()) {
+        reportStaleTrades(stale.getKey(), stale.getValue().intValue());
+      }
+    }
+  }
+
+  /** Counts one dropped trade for {@code alias}, creating the map on the first drop of a frame. */
+  private static Map<String, Integer> countStale(Map<String, Integer> staleByAlias, String alias) {
+    Map<String, Integer> counts =
+        staleByAlias == null ? new LinkedHashMap<String, Integer>() : staleByAlias;
+    Integer previous = counts.get(alias);
+    counts.put(alias, Integer.valueOf(previous == null ? 1 : previous.intValue() + 1));
+    return counts;
   }
 
   /** Buffers a trade that cannot be published yet; a full buffer is reported once per incident. */
@@ -973,7 +987,7 @@ public final class HyperliquidSession
       }
     }
     publishTrades(record, fresh);
-    reportStaleTrades(stale, " for " + record.alias());
+    reportStaleTrades(record.alias(), stale);
   }
 
   /** Returns whether a trade is newer than the last one published for its subscription. */
@@ -993,13 +1007,14 @@ public final class HyperliquidSession
   }
 
   /**
-   * Reports, in one line, trades dropped because they are not newer than the watermark. Every
-   * subscription start and every reconnect replays recent trades, so this is routine.
+   * Reports, in one line per instrument, trades dropped because they are not newer than the
+   * watermark. Every subscription start and every reconnect replays recent trades, so this is
+   * routine.
    */
-  private void reportStaleTrades(int stale, String scope) {
+  private void reportStaleTrades(String alias, int stale) {
     if (stale > 0) {
       sink.onDiagnostic(
-          "discarded " + stale + " trades not newer than the last published trade" + scope);
+          "discarded " + stale + " trades not newer than the last published trade for " + alias);
     }
   }
 

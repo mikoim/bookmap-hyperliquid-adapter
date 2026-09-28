@@ -43,7 +43,7 @@ public class HyperliquidSessionTradeReplayTest {
     fixture.bookAndAcks(10L);
 
     assertEquals("[3]", fixture.tids().toString());
-    assertEquals(1, fixture.diagnostics("discarded 2 trades").size());
+    assertEquals(1, fixture.diagnostics(discarded(2, "BTC")).size());
   }
 
   @Test
@@ -56,7 +56,7 @@ public class HyperliquidSessionTradeReplayTest {
     fixture.trades(trade(1L, 1L), trade(2L, 2L), trade(10L, 3L), trade(11L, 4L));
 
     assertEquals("[3, 4]", fixture.tids().toString());
-    assertEquals(1, fixture.diagnostics("discarded 2 trades").size());
+    assertEquals(1, fixture.diagnostics(discarded(2, "BTC")).size());
   }
 
   @Test
@@ -74,7 +74,7 @@ public class HyperliquidSessionTradeReplayTest {
     fixture.bookAndAcks(14L);
 
     assertEquals("[1, 2, 3]", fixture.tids().toString());
-    assertEquals(1, fixture.diagnostics("discarded 2 trades").size());
+    assertEquals(1, fixture.diagnostics(discarded(2, "BTC")).size());
   }
 
   @Test
@@ -89,7 +89,7 @@ public class HyperliquidSessionTradeReplayTest {
     fixture.trades(trade(11L, 1L), trade(11L, 2L));
 
     assertEquals("[1, 2]", fixture.tids().toString());
-    assertEquals(1, fixture.diagnostics("discarded 1 trades").size());
+    assertEquals(1, fixture.diagnostics(discarded(1, "BTC")).size());
   }
 
   @Test
@@ -129,9 +129,38 @@ public class HyperliquidSessionTradeReplayTest {
     assertEquals("[2]", fixture.tids().toString());
   }
 
+  @Test
+  public void aFrameOfSeveralInstrumentsReportsEachInstrumentsDiscardsOnItsOwnLine() {
+    Fixture fixture = new Fixture();
+    fixture.login();
+    fixture.subscribe("BTC");
+    fixture.bookAndAcks(10L);
+    fixture.subscribe("ETH");
+    fixture.book("ETH", 10L);
+    fixture.acks("ETH");
+
+    fixture.trades(trade("BTC", 1L, 1L), trade("ETH", 1L, 2L), trade("BTC", 2L, 3L));
+
+    assertEquals(1, fixture.diagnostics(discarded(2, "BTC")).size());
+    assertEquals(1, fixture.diagnostics(discarded(1, "ETH")).size());
+    assertEquals(2, fixture.diagnostics("discarded").size());
+  }
+
+  /** The diagnostic line for trades dropped by the watermark of one instrument. */
+  private static String discarded(int count, String alias) {
+    return "discarded " + count + " trades not newer than the last published trade for " + alias;
+  }
+
   /** One BTC buy fill whose price, 100 + tid, identifies it in the published trades. */
   private static String trade(long time, long tid) {
-    return "{\"coin\":\"BTC\",\"side\":\"B\",\"px\":\""
+    return trade("BTC", time, tid);
+  }
+
+  /** One buy fill for {@code coin} whose price, 100 + tid, identifies it. */
+  private static String trade(String coin, long time, long tid) {
+    return "{\"coin\":\""
+        + coin
+        + "\",\"side\":\"B\",\"px\":\""
         + (100L + tid)
         + ".000\",\"sz\":\"1\",\"time\":"
         + time

@@ -133,9 +133,11 @@
   公開リストに加え、残りを捨てることを言う。`publishBuffered` はこの処理になる
 - 有効化の後に届いた再送フレーム(ack と再送が有効化より後に処理される場合)は ③ で落ちる
 - ② ③ ④ ⑤ で水位線により捨てた約定は、`handleTrades` の 1 回の呼び出し、または
-  `publishBuffered` の 1 回の呼び出し(② と ⑤ で共用)ごとに、件数を 1 行の診断
-  (`sink.onDiagnostic`)で出す。捨てた約定が 0 件なら出さない。購読のたびに再送を捨てるのは
-  正常動作なので、約定 1 件ごとには出さない
+  `publishBuffered` の 1 回の呼び出し(② と ⑤ で共用)ごとに、銘柄ごとの件数を 1 行ずつ
+  診断(`sink.onDiagnostic`)で出す。形式は
+  `discarded <件数> trades not newer than the last published trade for <alias>`。捨てた約定が
+  0 件の銘柄については出さない。購読のたびに再送を捨てるのは正常動作なので、約定 1 件ごとには
+  出さない
 - `ACTIVE` の record は必ずアンカー済みである(有効化でアンカーするため)
 - `tradeDeduplicator` フィールド、定数 `TRADE_DEDUPLICATION_CAPACITY` /
   `TRADE_DEDUPLICATION_TTL_MILLIS`、`stop` の `tradeDeduplicator.clear()` を削除する
@@ -202,7 +204,8 @@ maybeRestore                                                                    
 6. `PENDING_BOOK` のまま再接続したとき、切断前の板で有効化せず、新しい板の時刻がアンカーになる
 7. Borsa(`SEED_THEN_DELTA`)では有効化で公開する板の時刻(seed と、有効化前に受理した差分の
    うち最新のもの)がアンカーになる
-8. 水位線で捨てた約定の診断は、1 回の呼び出しにつき 1 行。捨てた約定が無ければ出ない
+8. 水位線で捨てた約定の診断は、1 回の呼び出しにつき銘柄ごとに 1 行で、銘柄名が付く。
+   捨てた約定が無ければ出ない
 
 ### 既存テスト
 
