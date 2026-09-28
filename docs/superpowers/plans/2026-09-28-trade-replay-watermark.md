@@ -995,7 +995,7 @@ git rm -r src/main/java/com/bookmap/plugins/layer0/hyperliquid/trade \
 - [ ] **Step 9: Run the tests to verify they pass**
 
 Run: `env JAVA_HOME=/home/dev/Downloads/jdk-21.0.12.1 ./gradlew --offline test`
-Expected: PASS (421 tests; the 7 deleted `BoundedTradeDeduplicatorTest` cases are gone).
+Expected: PASS (421 tests; the 5 deleted `BoundedTradeDeduplicatorTest` cases are gone).
 
 - [ ] **Step 10: Update the documentation**
 
