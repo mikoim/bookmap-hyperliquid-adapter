@@ -1,6 +1,8 @@
 package com.bookmap.plugins.layer0.hyperliquid.session;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import com.bookmap.plugins.layer0.hyperliquid.FakeHyperliquidTransport;
 import com.bookmap.plugins.layer0.hyperliquid.HyperliquidConnector;
@@ -104,6 +106,27 @@ public class HyperliquidSessionTradeReplayTest {
     fixture.bookAndAcks(13L);
 
     assertEquals("[1]", fixture.tids().toString());
+  }
+
+  @Test
+  public void pendingSubscriptionAnchorsOnTheFirstBookOfTheNewConnection() {
+    Fixture fixture = new Fixture();
+    fixture.login();
+    fixture.subscribe("BTC");
+    fixture.book("BTC", 10L);
+    fixture.drain();
+
+    fixture.reconnect();
+    fixture.completeAllSends();
+    fixture.trades(trade(11L, 1L), trade(20L, 2L));
+    fixture.acks("BTC");
+    assertFalse(fixture.sink.events().contains("instrument-added:BTC"));
+
+    fixture.book("BTC", 20L);
+    fixture.drain();
+
+    assertTrue(fixture.sink.events().contains("instrument-added:BTC"));
+    assertEquals("[2]", fixture.tids().toString());
   }
 
   /** One BTC buy fill whose price, 100 + tid, identifies it in the published trades. */

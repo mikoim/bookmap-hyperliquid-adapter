@@ -262,6 +262,7 @@ public final class SubscriptionRecord {
     subscriptionGeneration = generation;
     sent.clear();
     acknowledgements.clear();
+    pendingBook = null;
     clearRecoveryBook();
     if (deltaBook != null) {
       deltaBook.beginGeneration();
