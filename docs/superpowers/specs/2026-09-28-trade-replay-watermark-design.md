@@ -1,7 +1,7 @@
 # 購読時の約定再送の扱い(約定の水位線) — 設計書
 
 - 作成日: 2026-09-28
-- 状態: 草稿(spec-review 前)
+- 状態: spec-review READY、人間の承認待ち
 - 起点: ローカル main `6725969`(購読送信の記録順の修正)
 - 対象: bookmap-hyperliquid-adapter(Bookmap Layer 0 マーケットデータアダプター)
 
@@ -105,7 +105,8 @@
 
 ### `SubscriptionRecord` の変更
 
-- `TradeWatermark tradeWatermark` を持ち、`tradeWatermark()` で返す
+- `TradeWatermark tradeWatermark` を持ち、package-private の `tradeWatermark()` で返す
+  (`TradeWatermark` が package-private のため)
 - `beginGeneration(long)` で `pendingBook = null` とする。現行は消さないため、`PENDING_BOOK` の
   まま再接続すると `maybeRestore` → `activateIfReady` が切断前の板で有効化し、その古い
   `lastAcceptedBookTime` がアンカーになる(再送の一部が公開される)。消すことで、有効化は新しい
@@ -131,9 +132,10 @@
 - 「水位線でふるう」は、バッファを到着順に走査し、`admits` が `true` のものについて `advance` して
   公開リストに加え、残りを捨てることを言う。`publishBuffered` はこの処理になる
 - 有効化の後に届いた再送フレーム(ack と再送が有効化より後に処理される場合)は ③ で落ちる
-- ③ ④ ⑤ で水位線により捨てた約定は、`handleTrades` の 1 回の呼び出し、または
-  `publishBuffered` の 1 回の呼び出しごとに、件数を 1 行の診断(`sink.onDiagnostic`)で出す。
-  購読のたびに再送を捨てるのは正常動作なので、約定 1 件ごとには出さない
+- ② ③ ④ ⑤ で水位線により捨てた約定は、`handleTrades` の 1 回の呼び出し、または
+  `publishBuffered` の 1 回の呼び出し(② と ⑤ で共用)ごとに、件数を 1 行の診断
+  (`sink.onDiagnostic`)で出す。捨てた約定が 0 件なら出さない。購読のたびに再送を捨てるのは
+  正常動作なので、約定 1 件ごとには出さない
 - `ACTIVE` の record は必ずアンカー済みである(有効化でアンカーするため)
 - `tradeDeduplicator` フィールド、定数 `TRADE_DEDUPLICATION_CAPACITY` /
   `TRADE_DEDUPLICATION_TTL_MILLIS`、`stop` の `tradeDeduplicator.clear()` を削除する
@@ -198,8 +200,9 @@ maybeRestore                                                                    
 4. 同じ `time` で別の `tid` は公開され、同じ `tid` は公開されない
 5. unsubscribe してから同じ銘柄を再購読しても、前の購読で公開した約定と再送は公開されない
 6. `PENDING_BOOK` のまま再接続したとき、切断前の板で有効化せず、新しい板の時刻がアンカーになる
-7. Borsa(`SEED_THEN_DELTA`)では seed の時刻がアンカーになる
-8. 水位線で捨てた約定の診断は、1 回の呼び出しにつき 1 行
+7. Borsa(`SEED_THEN_DELTA`)では有効化で公開する板の時刻(seed と、有効化前に受理した差分の
+   うち最新のもの)がアンカーになる
+8. 水位線で捨てた約定の診断は、1 回の呼び出しにつき 1 行。捨てた約定が無ければ出ない
 
 ### 既存テスト
 
