@@ -205,6 +205,46 @@ public class HyperliquidSessionDeltaBookTest {
     assertEquals(0, fixture.budget.reservedSubscriptionSlots());
   }
 
+  @Test
+  public void tradesOlderThanTheBookPublishedAtActivationAreDropped() {
+    Fixture fixture = new Fixture();
+    fixture.login();
+    fixture.subscribe("BTC");
+    fixture.completeSends(2);
+
+    fixture.receive(
+        trades(
+            trade(5L, "99.000"),
+            trade(11L, "100.000"),
+            trade(12L, "101.000"),
+            trade(15L, "102.000")));
+    fixture.receive(book("BTC", 10L, bids(level("100.000", "1")), asks()));
+    fixture.receive(book("BTC", 12L, bids(level("101.000", "2")), asks()));
+    fixture.drain();
+    fixture.receive(ack(SubscriptionType.L2_BOOK));
+    fixture.receive(ack(SubscriptionType.TRADES));
+    fixture.drain();
+
+    // The seed at 10 and the delta at 12 are published together, so the watermark starts at 12.
+    assertEquals(2, fixture.sink.trades().size());
+    assertEquals(1_010_000d, fixture.sink.trades().get(0).price(), 0d);
+    assertEquals(1_020_000d, fixture.sink.trades().get(1).price(), 0d);
+  }
+
+  private static String trades(String... fills) {
+    return "{\"channel\":\"trades\",\"data\":[" + String.join(",", fills) + "]}";
+  }
+
+  private static String trade(long time, String price) {
+    return "{\"coin\":\"BTC\",\"side\":\"B\",\"px\":\""
+        + price
+        + "\",\"sz\":\"1\",\"time\":"
+        + time
+        + ",\"tid\":"
+        + time
+        + "}";
+  }
+
   private static String ack(SubscriptionType type) {
     return "{\"channel\":\"subscriptionResponse\",\"data\":{\"method\":\"subscribe\","
         + "\"subscription\":{\"type\":\""

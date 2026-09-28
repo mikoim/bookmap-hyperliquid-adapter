@@ -43,6 +43,7 @@ public final class SubscriptionRecord {
   private final PriceBucketer bucketer;
   private final ArrayDeque<PendingTrade> pendingTrades = new ArrayDeque<PendingTrade>();
   private final Set<TradeKey> pendingTradeKeys = new HashSet<TradeKey>();
+  private final TradeWatermark tradeWatermark = new TradeWatermark();
   private final EnumSet<SubscriptionType> sent = EnumSet.noneOf(SubscriptionType.class);
   private final EnumSet<SubscriptionType> acknowledgements = EnumSet.noneOf(SubscriptionType.class);
 
@@ -265,6 +266,11 @@ public final class SubscriptionRecord {
     if (deltaBook != null) {
       deltaBook.beginGeneration();
     }
+  }
+
+  /** Returns the exchange time of the last published trade, anchored at activation. */
+  TradeWatermark tradeWatermark() {
+    return tradeWatermark;
   }
 
   /** Stores a converted pending trade when its bounded queue has room. */

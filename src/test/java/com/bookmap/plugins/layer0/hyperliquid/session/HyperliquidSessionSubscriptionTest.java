@@ -160,7 +160,7 @@ public class HyperliquidSessionSubscriptionTest {
     fixture.drain();
     assertTrue(fixture.sink.trades().isEmpty());
 
-    fixture.receive(book("BTC", 3L, "102.000", "1"));
+    fixture.receive(book("BTC", 1L, "102.000", "1"));
     fixture.drain();
     fixture.receive(ack(SubscriptionType.L2_BOOK));
     fixture.receive(ack(SubscriptionType.TRADES));
@@ -275,7 +275,7 @@ public class HyperliquidSessionSubscriptionTest {
     assertEquals(1, countContaining(fixture.sink.events(), "buffer full"));
     assertTrue(fixture.sink.trades().isEmpty());
 
-    fixture.receive(book("BTC", 2_000L, "102.000", "1"));
+    fixture.receive(book("BTC", 1L, "102.000", "1"));
     fixture.drain();
     fixture.receive(ack(SubscriptionType.L2_BOOK));
     fixture.receive(ack(SubscriptionType.TRADES));
@@ -544,7 +544,7 @@ public class HyperliquidSessionSubscriptionTest {
     fixture.transport.socket().succeedNextSend();
     fixture.drain();
     fixture.receive(trades(duplicate));
-    fixture.receive(book("BTC", 10L, "100.000", "1"));
+    fixture.receive(book("BTC", 9L, "100.000", "1"));
     fixture.receive(ack(SubscriptionType.L2_BOOK));
     fixture.receive(ack(SubscriptionType.TRADES));
     fixture.drain();

@@ -25,10 +25,10 @@ import com.bookmap.plugins.layer0.hyperliquid.model.SubscriptionType;
 import com.bookmap.plugins.layer0.hyperliquid.model.SymbolLookup;
 import com.bookmap.plugins.layer0.hyperliquid.model.TickSizePlan;
 import com.bookmap.plugins.layer0.hyperliquid.model.TradeEvent;
+import com.bookmap.plugins.layer0.hyperliquid.model.TradeKey;
 import com.bookmap.plugins.layer0.hyperliquid.model.ValueConversionException;
 import com.bookmap.plugins.layer0.hyperliquid.parse.HyperliquidMessageParser;
 import com.bookmap.plugins.layer0.hyperliquid.session.SubscriptionRecord.PendingTrade;
-import com.bookmap.plugins.layer0.hyperliquid.trade.BoundedTradeDeduplicator;
 import com.bookmap.plugins.layer0.hyperliquid.transport.TransportFailure;
 import java.math.BigDecimal;
 import java.util.ArrayDeque;
@@ -51,8 +51,6 @@ public final class HyperliquidSession
 
   private static final long ACTIVATION_TIMEOUT_MILLIS = 10_000L;
   private static final long ACK_TIMEOUT_MILLIS = 10_000L;
-  private static final int TRADE_DEDUPLICATION_CAPACITY = 10_000;
-  private static final long TRADE_DEDUPLICATION_TTL_MILLIS = 600_000L;
   private static final long ASSET_CONTEXT_REPUBLISH_INTERVAL_MILLIS = 5_000L;
 
   private final HyperliquidConnector connector;
@@ -64,8 +62,6 @@ public final class HyperliquidSession
   private final SessionSink sink;
   private final DataHealthMonitor dataHealth;
   private final Runnable afterClose;
-  private final BoundedTradeDeduplicator tradeDeduplicator =
-      new BoundedTradeDeduplicator(TRADE_DEDUPLICATION_CAPACITY, TRADE_DEDUPLICATION_TTL_MILLIS);
   private final AssetContextStore assetContexts = new AssetContextStore();
   private final AssetContextConnectorFactory assetContextConnectorFactory;
   private final MetadataRequestFactory metadataRequestFactory;
@@ -851,6 +847,7 @@ public final class HyperliquidSession
     }
     SubscriptionRecord publishing = null;
     List<PendingTrade> publishable = new ArrayList<PendingTrade>();
+    int stale = 0;
     for (TradeEvent trade : trades) {
       SubscriptionRecord record = records.get(trade.coin());
       if (record == null || record.state() == SubscriptionRecord.State.REMOVED) {
@@ -862,11 +859,20 @@ public final class HyperliquidSession
         continue;
       }
       boolean pendingBook = record.state() == SubscriptionRecord.State.PENDING_BOOK;
-      if (pendingBook || (recovering && connectionState == ConnectionState.RECONNECTING)) {
-        bufferTrade(record, converted, pendingBook ? "pending" : "recovery");
+      if (pendingBook) {
+        bufferTrade(record, converted, "pending");
         continue;
       }
-      if (!tradeDeduplicator.markIfNew(converted.key(), clock.getAsLong())) {
+      if (recovering && connectionState == ConnectionState.RECONNECTING) {
+        if (admits(record, converted)) {
+          bufferTrade(record, converted, "recovery");
+        } else {
+          stale++;
+        }
+        continue;
+      }
+      if (!admit(record, converted)) {
+        stale++;
         continue;
       }
       if (publishing != record) {
@@ -877,12 +883,12 @@ public final class HyperliquidSession
       publishable.add(converted);
     }
     publishTrades(publishing, publishable);
+    reportStaleTrades(stale, "");
   }
 
   /** Buffers a trade that cannot be published yet; a full buffer is reported once per incident. */
   private void bufferTrade(SubscriptionRecord record, PendingTrade trade, String bufferName) {
-    if (tradeDeduplicator.contains(trade.key(), clock.getAsLong())
-        || record.containsPendingTradeKey(trade.key())) {
+    if (record.containsPendingTradeKey(trade.key())) {
       return;
     }
     if (!record.addPendingTrade(trade) && !record.pendingTradeOverflowWarned()) {
@@ -923,6 +929,7 @@ public final class HyperliquidSession
       publishDepth(record, record.diff().apply(record.takePendingBook(), false));
     }
     dataHealth.bookPublished(record.alias(), currentGeneration);
+    record.tradeWatermark().anchor(record.lastAcceptedBookTime());
     publishBuffered(record, record.takePendingTrades());
   }
 
@@ -954,15 +961,46 @@ public final class HyperliquidSession
         });
   }
 
-  /** Publishes a drained buffer, dropping whatever was published in the meantime. */
+  /** Publishes a drained buffer, dropping whatever is not newer than the trade watermark. */
   private void publishBuffered(SubscriptionRecord record, ArrayDeque<PendingTrade> buffered) {
     List<PendingTrade> fresh = new ArrayList<PendingTrade>(buffered.size());
+    int stale = 0;
     for (PendingTrade trade : buffered) {
-      if (tradeDeduplicator.markIfNew(trade.key(), clock.getAsLong())) {
+      if (admit(record, trade)) {
         fresh.add(trade);
+      } else {
+        stale++;
       }
     }
     publishTrades(record, fresh);
+    reportStaleTrades(stale, " for " + record.alias());
+  }
+
+  /** Returns whether a trade is newer than the last one published for its subscription. */
+  private static boolean admits(SubscriptionRecord record, PendingTrade trade) {
+    TradeKey key = trade.key();
+    return record.tradeWatermark().admits(key.time(), key.tid());
+  }
+
+  /** Advances the watermark past a trade that will be published, or returns false for a replay. */
+  private static boolean admit(SubscriptionRecord record, PendingTrade trade) {
+    if (!admits(record, trade)) {
+      return false;
+    }
+    TradeKey key = trade.key();
+    record.tradeWatermark().advance(key.time(), key.tid());
+    return true;
+  }
+
+  /**
+   * Reports, in one line, trades dropped because they are not newer than the watermark. Every
+   * subscription start and every reconnect replays recent trades, so this is routine.
+   */
+  private void reportStaleTrades(int stale, String scope) {
+    if (stale > 0) {
+      sink.onDiagnostic(
+          "discarded " + stale + " trades not newer than the last published trade" + scope);
+    }
   }
 
   private SubscriptionRecord recordForKey(SubscriptionKey key) {
@@ -1185,7 +1223,6 @@ public final class HyperliquidSession
     for (String coin : new ArrayList<String>(records.keySet())) {
       removeRecord(coin, cause == StopCause.FATAL ? RemovalCause.FATAL : RemovalCause.CLOSE, null);
     }
-    tradeDeduplicator.clear();
     dispatcher.submitControl(
         new Runnable() {
           @Override

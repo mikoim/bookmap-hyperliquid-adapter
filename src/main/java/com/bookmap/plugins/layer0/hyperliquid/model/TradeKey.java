@@ -16,6 +16,16 @@ public final class TradeKey {
     this.tid = tid;
   }
 
+  /** Returns the exchange time of the trade in milliseconds. */
+  public long time() {
+    return time;
+  }
+
+  /** Returns the exchange trade id. */
+  public long tid() {
+    return tid;
+  }
+
   @Override
   public boolean equals(Object other) {
     if (this == other) {

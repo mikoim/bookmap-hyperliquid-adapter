@@ -76,7 +76,7 @@ public class ProviderEndToEndTest {
   }
 
   @Test
-  public void tradeDeduplicationUsesTenMinuteTtlAndTenThousandEntryCapacity() {
+  public void aTradeIsNeverPublishedAgainHoweverLateOrBuriedItsReplay() {
     Fixture fixture = new Fixture(budget(2, 20, 20, 2));
     fixture.login(HyperliquidEnvironment.MAINNET);
     fixture.subscribe("BTC");
@@ -104,9 +104,10 @@ public class ProviderEndToEndTest {
     fixture.drain();
     assertEquals(10_001, fixture.data.trades.size());
 
+    fixture.clock.now = 60_000L + 11L * 60_000L;
     fixture.trade("BTC", "B", "100", "1", 2L, 7L);
     fixture.drain();
-    assertEquals(10_002, fixture.data.trades.size());
+    assertEquals(10_001, fixture.data.trades.size());
 
     fixture.closeTwice();
     fixture.assertClosed();

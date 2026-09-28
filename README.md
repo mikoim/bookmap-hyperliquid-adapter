@@ -84,6 +84,14 @@ transaction cannot be told apart and form one execution. Fills without a transac
 exchange sends an all-zero hash for some system-generated fills — are delivered one by one, as
 before.
 
+Every trades subscription starts with the exchange replaying its most recent trades. The adapter
+never delivers a trade older than the instrument's first book, so nothing from before the
+subscription appears at the moment you subscribe. After a reconnect the replay is used to recover
+what the disconnect missed: trades newer than the last one delivered for that instrument are
+delivered, at the time of recovery, and older ones are dropped. The replay is short — at the time of
+writing 30 trades from Hyperliquid, 100 from Borsa and none from Hyperdash — and anything the
+disconnect lost beyond it is not recovered.
+
 Not supported: historical data, account data, credentials, order entry, and gap filling. Order
 APIs fail closed with a read-only system message.
 
@@ -98,7 +106,7 @@ anomalies, INFO for recovery, subject to Bookmap's configured log level. Every m
 | `BOOK_STALE` | No valid book has been accepted for this symbol for 30 seconds. Reception has gone quiet; this is not proof that the feed failed, and no reconnect is forced. | Wait. If it persists, reconnect or try another source. |
 | `BOOK_RESYNCING` | A disconnect or an internal queue overflow invalidated the book. One incident invalidates every subscription at once and is reported once, naming all affected symbols. | Wait for `BOOK_RESUMED`. |
 | `BOOK_RESUMED` | A replacement book has been published. This also clears a stale warning. | Nothing. |
-| `TRADE_GAP_POSSIBLE` | A disconnect or a buffer overflow may have lost trades. The reported interval uses local processing times and is deliberately conservative; it is not an exact exchange-side range. | Treat trades in that interval as incomplete. They are not backfilled. |
+| `TRADE_GAP_POSSIBLE` | A disconnect or a buffer overflow may have lost trades. The reported interval uses local processing times and is deliberately conservative; it is not an exact exchange-side range. | Treat trades in that interval as incomplete. Only trades the exchange replays on reconnect are recovered; nothing else is backfilled. |
 | `TRADE_RESUMED` | A trade has been published again, ending the possible-gap interval. | Nothing. |
 | `MARK_PRICE_UNAVAILABLE` | The mark-price connection failed or its subscription was rejected. Tick-size candidates keep their last known prices. | Wait. Reopening the socket alone does not clear this. |
 | `MARK_PRICE_RESUMED` | Usable mark-price data has arrived again. | Nothing. |
@@ -114,8 +122,8 @@ Mark prices always come from Hyperliquid, whatever the selected order book sourc
   budget, so leave external headroom for it and for Hyperliquid's own limits.
 - Borsa and Hyperdash each need a second connection to Hyperliquid Mainnet for mark prices, which
   caps a single JVM at five relay-backed providers.
-- During a disconnect the adapter reconnects and resynchronizes, but there is no historical gap fill
-  and trades can be missed.
+- During a disconnect the adapter reconnects and resynchronizes. Trades are recovered only from the
+  exchange's short replay on reconnect; there is no historical gap fill and trades can be missed.
 - On Testnet the instrument list holds roughly 630 perpetuals across about 200 perp dexes and
   roughly 1,300 spot pairs, most of them throwaway markets deployed by other developers.
 - An instrument whose mark price has not arrived yet lists its full-precision grid as the default
