@@ -939,7 +939,7 @@ public final class HyperliquidSession
     }
   }
 
-  /** Publishes trades that already passed deduplication, flagged as executions. */
+  /** Publishes trades that already passed the trade watermark, flagged as executions. */
   private void publishTrades(final SubscriptionRecord record, List<PendingTrade> trades) {
     if (record == null || trades.isEmpty()) {
       return;

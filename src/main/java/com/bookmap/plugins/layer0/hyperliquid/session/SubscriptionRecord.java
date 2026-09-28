@@ -257,7 +257,11 @@ public final class SubscriptionRecord {
     return acknowledgements.contains(type);
   }
 
-  /** Clears current-generation acknowledgement state when a new socket opens. */
+  /**
+   * Clears current-generation acknowledgement state when a new socket opens, and drops a pending
+   * book from the previous connection so a pending subscription activates, and anchors its trade
+   * watermark, on the new connection's book.
+   */
   public void beginGeneration(long generation) {
     subscriptionGeneration = generation;
     sent.clear();
@@ -269,7 +273,7 @@ public final class SubscriptionRecord {
     }
   }
 
-  /** Returns the exchange time of the last published trade, anchored at activation. */
+  /** Returns this subscription's trade watermark, anchored at activation. */
   TradeWatermark tradeWatermark() {
     return tradeWatermark;
   }

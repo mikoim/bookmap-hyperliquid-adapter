@@ -84,8 +84,8 @@ transaction cannot be told apart and form one execution. Fills without a transac
 exchange sends an all-zero hash for some system-generated fills — are delivered one by one, as
 before.
 
-Every trades subscription starts with the exchange replaying its most recent trades. The adapter
-never delivers a trade older than the instrument's first book, so nothing from before the
+Hyperliquid and Borsa start every trades subscription by replaying their most recent trades. The
+adapter never delivers a trade older than the instrument's first book, so nothing from before the
 subscription appears at the moment you subscribe. After a reconnect the replay is used to recover
 what the disconnect missed: trades newer than the last one delivered for that instrument are
 delivered, at the time of recovery, and older ones are dropped. The replay is short — at the time of
